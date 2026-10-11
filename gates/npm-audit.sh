@@ -20,13 +20,16 @@ source "$(dirname "$0")/lib.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# Every lockfile-shaped file, outside dependency and VCS directories. The listing goes to a
+# Every lockfile-shaped file, outside dependency and VCS directories. A SYMLINK counts: npm
+# follows one when it installs, and `-type f` alone skipped a `package-lock.json` tracked as a
+# link to a real lockfile, leaving nothing audited and printing ok over a tree whose lock npm
+# itself reports a high advisory in. The listing goes to a
 # file and find's own status is checked BEFORE it is read: `done < <(find ...)` discards that
 # status, and zero lines out of a failed search is not the same fact as zero lockfiles.
 set +e
 find "$ROOT" \( -name node_modules -o -name .git \) -prune -o \
   \( -name package-lock.json -o -name npm-shrinkwrap.json -o -name yarn.lock -o -name pnpm-lock.yaml \) \
-  -type f -print > "$WORK/locks" 2> "$WORK/find.err"
+  \( -type f -o -type l \) -print > "$WORK/locks" 2> "$WORK/find.err"
 rc=$?
 set -e
 if [ "$rc" -ne 0 ]; then
@@ -56,6 +59,10 @@ while IFS= read -r lock; do
   [ -n "$lock" ] || continue
   is_fixture "$lock" && continue
   rel="${lock#"$ROOT"/}"
+  if [ -L "$lock" ] && [ ! -e "$lock" ]; then
+    unknown "$rel: symlink whose target does not exist — there is no lockfile behind it to audit"
+    continue
+  fi
   case "$(basename -- "$lock")" in
     yarn.lock|pnpm-lock.yaml|npm-shrinkwrap.json)
       unknown "$rel: lockfile format this gate does not read — its dependencies were not audited"
@@ -69,8 +76,13 @@ while IFS= read -r lock; do
   audited=$((audited+1))
   dir="$(dirname -- "$lock")"
   set +e
+  # `--workspaces=false --prefix .`: without them, a lockfile inside an npm workspace member is
+  # never the one audited. npm sets the prefix to the WORKSPACE ROOT whenever the current
+  # directory is inside a workspace, so `cd` into the member audits the root's lock again and
+  # reports on a file other than the one named in the message — ok over a high advisory,
+  # measured: the root lock clean, packages/web's lock holding lodash@4.17.20.
   ( cd -- "$dir" && "${TIMEOUT[@]}" npm audit --package-lock-only --omit=dev --json --fetch-retries=1 \
-      > "$WORK/out.json" 2> "$WORK/out.err" )
+      --workspaces=false --prefix . > "$WORK/out.json" 2> "$WORK/out.err" )
   rc=$?
   set -e
   if [ "$rc" -eq 124 ]; then

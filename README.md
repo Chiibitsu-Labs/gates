@@ -430,7 +430,11 @@ header, which is the honest account of what that scanner does not do.
   Dependabot alerts on `fixtures/npm-audit/bad/**/package-lock.json` are expected: the lockfiles
   there pin `lodash@4.17.20` on purpose, because a fixture has to be vulnerable to count.
   Only high and critical fail; moderate and low advisories are not reported. Dev dependencies
-  are not audited: an advisory in a build tool does not ship.
+  are not audited: an advisory in a build tool does not ship. Each lockfile is audited on its own
+  (`--workspaces=false --prefix .`): npm otherwise resolves the prefix of a workspace member to
+  the workspace ROOT and audits the root's lock instead of the one named in the message, which
+  was a false green here before `cases/workspace-member-lockfile`. A lockfile tracked as a
+  symlink is followed, as npm follows it; a dangling one is UNKNOWN.
 - **Archives are not inspected.** Six review rounds found bypass after bypass in the
   machinery that opened them, and the rate never fell. It was removed.
 - **LFS objects in history.** `lfs: true` materialises the checked-out tree only, so a
