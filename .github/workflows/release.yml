@@ -59,6 +59,8 @@ jobs:
             echo "Commit \`$sha\`"
             echo
             echo '```yaml'
+            echo 'jobs:'
+            echo '  gates:'
             echo "    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@$sha # $TAG"
             echo '    with:'
             echo "      gates_ref: $sha # $TAG"
