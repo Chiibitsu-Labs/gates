@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 # Every migration ships its rollback, and every table it creates ships RLS in the same file.
 # The down-file rule: a migration without one nearly deleted a live cohort on the next push.
 # The RLS rule: when an app's route gate silently failed open, RLS was the only thing between

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 """Tier 1 gate: every in-repo path cited in the docs must resolve.
 
 This whole OS runs on agents following file references. `docs/04` tells a session to

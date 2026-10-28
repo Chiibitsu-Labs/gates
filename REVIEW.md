@@ -49,7 +49,7 @@ rather than posting them inline. If everything found is a Nit, open the summary 
   credential value, a broken in-repo doc reference, and a request-path module that can reach
   the service-role secret. If one of those is wrong, the gate is red already; if the gate is
   green and you disagree with it, that is a finding about the **gate**, and it belongs in
-  chiibitsu/gates with a fixture, not as a comment on this diff.
+  Chiibitsu-Labs/gates with a fixture, not as a comment on this diff.
 - Lockfiles.
 - `fixtures/` — every file under it is a planted failure. Its whole purpose is to be wrong.
 - Vendored files: `gates/check_secrets.py` and `gates/check_references.py` are byte-identical
