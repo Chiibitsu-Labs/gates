@@ -51,6 +51,7 @@ jobs:
             [ "v$cff" = "$TAG" ] || { echo "::error::CITATION.cff says $cff but the tag is $TAG. Do not publish; fix the version first."; exit 1; }
           fi
 
+          title="$(scripts/release/notes.sh --title "$TAG")"
           scripts/release/notes.sh "$TAG" > notes.md
           {
             echo
@@ -70,7 +71,7 @@ jobs:
           } >> notes.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+            gh release edit "$TAG" --title "$title" --notes-file notes.md
           else
-            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md
+            gh release create "$TAG" --verify-tag --title "$title" --notes-file notes.md
           fi

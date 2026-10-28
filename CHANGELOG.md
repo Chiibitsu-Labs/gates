@@ -8,6 +8,9 @@ tagged, and a commit cannot contain its own hash.
 Write each paragraph or bullet on one line: GitHub shows every line break in a release as a
 real break.
 
+Each section's heading is `## vX.Y.Z (date): Headline`. The headline is a few plain words
+saying what the release is about, and becomes the GitHub release title.
+
 Every section answers the same four questions, under these exact headings, and
 `selftest.sh` fails if the version in `CITATION.cff` has no section or a section is
 missing one:
@@ -20,7 +23,7 @@ missing one:
 The full history, including releases before this file existed, is the Releases table in
 `README.md`. That table stays the authority on which versions are safe to use.
 
-## v1.2.2 (2026-10-28)
+## v1.2.2 (2026-10-28): New home at Chiibitsu-Labs
 
 ### What changed
 - The toolkit moved from `chiibitsu/gates` to `Chiibitsu-Labs/gates`. The shared workflow now checks itself out under the new name.

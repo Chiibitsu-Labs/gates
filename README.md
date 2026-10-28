@@ -286,7 +286,7 @@ A release's `CITATION.cff` names its own version — that is the part that must 
 ### Cutting a release
 
 1. In the release pull request, set `version` and `date-released` in `CITATION.cff`, add a
-   `## vX.Y.Z (date)` section at the top of `CHANGELOG.md` answering its four questions, and
+   `## vX.Y.Z (date): Headline` section at the top of `CHANGELOG.md` answering its four questions, and
    add the row to the table above. `./selftest.sh` is red until the notes exist.
 2. Merge it, then tag the merged commit: `git tag -a vX.Y.Z -m vX.Y.Z <sha> && git push origin vX.Y.Z`.
 3. `.github/workflows/release.yml` creates the GitHub release from that section and adds the
