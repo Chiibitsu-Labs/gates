@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 # If the app has a request proxy, it lives where Next.js will actually load it. Next 16:
 # proxy.ts at the same level as app/ (so src/proxy.ts when src/app exists). One placed at
 # the repo root never ran, every route answered anonymous callers with 200, and only RLS

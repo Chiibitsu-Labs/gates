@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 # Shared helpers for the gate toolkit. Every gate:
 #   - takes the tree to check as arg 1, or in $GATE_ROOT. There is NO default. This
 #     toolkit is checked out beside the repo it inspects, not inside it, so the old

@@ -1,5 +1,5 @@
 name: review
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 #
 # REUSABLE workflow. The DRAFT-STAGE reviewer: a model reads the diff against REVIEW.md while
 # the pull request is still a draft, so the findings arrive before anyone is asked to look.

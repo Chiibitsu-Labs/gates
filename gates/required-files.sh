@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 # Every path in required-files.txt exists (and is git-tracked when inside a repo), dotfiles
 # included. The published template once shipped without .github/, .claude/, .gitignore or a
 # backup doc; clients deployed it with no gates and no hooks and nobody noticed for weeks.

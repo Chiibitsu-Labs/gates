@@ -79,7 +79,6 @@ than nothing: an empty list looks exercised and is not.
 | `gates/check_secrets.py` | credential **values** in the working tree, and — when a range is supplied — the pushed history, commit messages, author and committer identities, added and renamed filenames, ref names and annotated tag objects, all through a redaction choke point |
 | `gates/check_references.py` | every in-repo path cited in the docs resolves; anything it cannot parse is reported UNCHECKED, never passed |
 | `gates/service-role.sh` | no request-path module can reach the service-role secret. Walks the import graph out of `app/`, `pages/`, `middleware.*` and `proxy.*`; any import it cannot resolve is reported **UNKNOWN**, never assumed clean |
-| `gates/npm-audit.sh` | no production dependency in any `package-lock.json` carries a known **high or critical** advisory (`npm audit --omit=dev`). **Not hermetic:** it asks the npm registry, so a tree can go red later when an advisory is published, and a registry that does not answer is reported **UNKNOWN**, never ok. `yarn.lock`, `pnpm-lock.yaml` and `npm-shrinkwrap.json` are not read and are UNKNOWN too |
 
 `gates/lib.sh` is shared helpers, not a gate. It takes the tree to check as argument 1
 or in `GATE_ROOT`, and exits 2 if neither is given — this toolkit is checked out beside
@@ -158,9 +157,9 @@ instructions.
 on: [pull_request, push]
 jobs:
   gates:
-    uses: chiibitsu/gates/.github/workflows/gates.yml@<sha-from-the-releases-table>  # v1.2.1
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<sha-from-the-releases-table>  # v1.2.2
     with:
-      gates_ref: <sha-from-the-releases-table> # v1.2.1
+      gates_ref: <sha-from-the-releases-table> # v1.2.2
 
   # The draft-stage reviewer. Needs a repository secret CLAUDE_CODE_OAUTH_TOKEN, and the
   # permissions block because a called workflow can only narrow the caller's token, never
@@ -171,7 +170,7 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: chiibitsu/gates/.github/workflows/review.yml@<sha-from-the-releases-table> # v1.2.1
+    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@<sha-from-the-releases-table> # v1.2.2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -192,7 +191,7 @@ one commit running the gate scripts from another. Bump both with a custom manage
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.*\\.ya?ml$/"],
       "matchStrings": ["gates_ref:\\s*(?<currentDigest>[0-9a-f]{40})\\s*#\\s*(?<currentValue>v[0-9.]+)"],
-      "depNameTemplate": "chiibitsu/gates",
+      "depNameTemplate": "Chiibitsu-Labs/gates",
       "datasourceTemplate": "github-tags"
     }
   ]
@@ -259,7 +258,7 @@ Five live in the repo being checked. The sixth belongs to the template, not here
 
 ## Releases
 
-The Commit column names a **tag** for the current release and a SHA for superseded ones, and that asymmetry is forced: the table lives in the commit being tagged, so it cannot contain that commit's own hash. Resolve the tag — `git rev-list -n1 v1.2.1` — and pin the SHA you get. Pin a SHA, never a tag: a tag is a movable name, and this table exists because names have been wrong here before.
+The Commit column names a **tag** for the current release and a SHA for superseded ones, and that asymmetry is forced: the table lives in the commit being tagged, so it cannot contain that commit's own hash. Resolve the tag — `git rev-list -n1 v1.2.2` — and pin the SHA you get. Pin a SHA, never a tag: a tag is a movable name, and this table exists because names have been wrong here before.
 
 That rule applies to everything this repo pins, not only to itself, and the reviewer's action is the measured case. On 2026-09-08, `anthropics/claude-code-action` resolved as:
 
@@ -274,7 +273,8 @@ A release's `CITATION.cff` names its own version — that is the part that must 
 
 | Version | Commit | Use it? |
 |---|---|---|
-| **v1.2.1** | tag `v1.2.1` — resolve with `git rev-list -n1 v1.2.1`, or read it off the release page | **Yes — use this one.** Fixes three defects in `service-role.sh` that v1.1.0 and v1.2.0 both shipped, each reproduced before the fix and each carrying a fixture: an ordinary circular import **did not terminate** (a hang, which reports nothing at all); one file reached by two spellings was counted twice, printing two findings each claiming "1 request-path module(s)"; and a multi-line `await import(` was a **false green** — `ok`, exit 0, over a page reaching `SUPABASE_SERVICE_ROLE_KEY`. Also fixes a concurrency key in `review.yml` that collapsed on non-PR events. Carries v1.0.2's known false green in `actions-sha-pinned.sh`, described below. |
+| **v1.2.2** | tag `v1.2.2` — resolve with `git rev-list -n1 v1.2.2`, or read it off the release page | **Yes — use this one.** The toolkit moved to `Chiibitsu-Labs/gates`; the workflow checks itself out under the new name, and every caller should name it there, because GitHub Actions does not follow a transfer redirect for `uses:`. Removes the unreleased `npm-audit` gate: dependency audit lives in `Chiibitsu-Labs/security-checks`, one home for security. Gates otherwise identical to v1.2.1. |
+| v1.2.1 | `a0437c5` | **Usable, and superseded by v1.2.2** — same gates and reviewer. Its workflow checks the toolkit out as `chiibitsu/gates`, the name before the move to the Chiibitsu-Labs org. Fixes three defects in `service-role.sh` that v1.1.0 and v1.2.0 both shipped, each reproduced before the fix and each carrying a fixture: an ordinary circular import **did not terminate** (a hang, which reports nothing at all); one file reached by two spellings was counted twice, printing two findings each claiming "1 request-path module(s)"; and a multi-line `await import(` was a **false green** — `ok`, exit 0, over a page reaching `SUPABASE_SERVICE_ROLE_KEY`. Also fixes a concurrency key in `review.yml` that collapsed on non-PR events. Carries v1.0.2's known false green in `actions-sha-pinned.sh`, described below. |
 | v1.2.0 | `44f6125` | **Do not use.** Its `service-role.sh` is byte-identical to v1.1.0's and carries all three defects listed under v1.2.1 — including a false green on a multi-line dynamic import and a walk that does not terminate on a circular one. The reviewer it adds is sound; the gate underneath it is not. Move to v1.2.1. |
 | v1.1.0 | `7832ea6` | **Do not use** — same three `service-role.sh` defects as v1.2.0, described in the v1.2.1 row. Six gates, no reviewer. Added `service-role.sh`, the UNKNOWN outcome, and `gates/MANIFEST.txt` with a both-directions check against the `gates/` directory. Adopting it can turn a consumer red on code that was green under v1.0.4, because `service-role.sh` did not exist to check it; that is a finding, not a regression. |
 | v1.0.4 | `e075a93` | **Usable, and superseded by v1.1.0** — five gates instead of six, so nothing checks whether the request path can reach the service-role secret. Its `CITATION.cff` names the version on its tag, which v1.0.0 and v1.0.1 also did and v1.0.2 and v1.0.3 did not. Gates byte-identical to v1.0.2 and v1.0.3, so it carries their one known false green, described below. |
@@ -417,24 +417,6 @@ header, which is the honest account of what that scanner does not do.
   `middleware.*`, `proxy.*`. A tree that depends on `next` and has none of them is UNKNOWN;
   a tree that does not depend on `next` is reported as having no request path to walk, in
   those words, rather than as a pass.
-- **The npm-audit gate is not deterministic and needs the network.** Every other gate gives the
-  same answer for the same tree; this one asks the registry's advisory endpoint, so a tree that
-  passed yesterday can fail today, and `selftest.sh` now needs registry access for its
-  `npm-audit` legs. That is deliberate — an advisory database is the one input a hermetic gate
-  cannot have — and the cost is stated here rather than discovered. When the registry does not
-  answer, or the lockfile cannot be read, the gate reports UNKNOWN (red), decided from the
-  JSON and never from `npm audit`'s exit status, which is 1 both for "found advisories" and
-  for "could not ask". Two failure modes cannot be planted as fixtures and were verified by
-  hand: an unreachable registry (`npm_config_registry=http://127.0.0.1:1` gives UNKNOWN) and a
-  hung request (the 120s `timeout`; absent on a stock macOS, where the audit runs unbounded).
-  Dependabot alerts on `fixtures/npm-audit/bad/**/package-lock.json` are expected: the lockfiles
-  there pin `lodash@4.17.20` on purpose, because a fixture has to be vulnerable to count.
-  Only high and critical fail; moderate and low advisories are not reported. Dev dependencies
-  are not audited: an advisory in a build tool does not ship. Each lockfile is audited on its own
-  (`--workspaces=false --prefix .`): npm otherwise resolves the prefix of a workspace member to
-  the workspace ROOT and audits the root's lock instead of the one named in the message, which
-  was a false green here before `cases/workspace-member-lockfile`. A lockfile tracked as a
-  symlink is followed, as npm follows it; a dangling one is UNKNOWN.
 - **Archives are not inspected.** Six review rounds found bypass after bypass in the
   machinery that opened them, and the rate never fell. It was removed.
 - **LFS objects in history.** `lfs: true` materialises the checked-out tree only, so a

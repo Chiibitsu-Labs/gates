@@ -28,7 +28,7 @@ fixture just as surely as one that says nothing.
 
 ## How to run it
 
-1. In a repository whose workflow calls `chiibitsu/gates/.github/workflows/review.yml`, copy
+1. In a repository whose workflow calls `Chiibitsu-Labs/gates/.github/workflows/review.yml`, copy
    `src/app/api/items/route.ts` from this fixture to the same path in that repo.
 2. Open a pull request **as a draft**. The reviewer runs only on drafts; on a ready PR the job
    reports `skipped`, and skipped is not a pass.

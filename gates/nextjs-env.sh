@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 # The Next.js-specific footguns, and ONLY those. Three checks: a NEXT_PUBLIC_ variable
 # named like a server secret, a tracked .env that is not .env.example, and an optional
 # per-repo denylist of names and slugs.

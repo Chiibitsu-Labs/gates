@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 #
 # Proves every gate can fail, then runs it on a real tree.
 #

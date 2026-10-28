@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Part of chiibitsu/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/chiibitsu/gates
+# Part of Chiibitsu-Labs/gates by Angeline S. Viray (Chiibitsu Labs). MIT. https://github.com/Chiibitsu-Labs/gates
 """Tier 1 gate: a fast smoke check for credentials in the working tree.
 
 ## What this is, precisely

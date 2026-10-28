@@ -14,7 +14,7 @@ on:
     inputs:
       gates_ref:
         description: >-
-          The chiibitsu/gates commit to run. Pass the SAME 40-character SHA you pinned
+          The Chiibitsu-Labs/gates commit to run. Pass the SAME 40-character SHA you pinned
           in `uses:`. It is required, and that is not an oversight: a reusable workflow
           cannot discover its own commit. GitHub exposes github.workflow_sha and
           github.workflow_ref as the CALLER's workflow, github.action_ref is empty
@@ -67,7 +67,7 @@ jobs:
       - name: Checkout the gate toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: chiibitsu/gates
+          repository: Chiibitsu-Labs/gates
           ref: ${{ inputs.gates_ref }}
           path: gates-toolkit
 
