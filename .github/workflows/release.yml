@@ -1,0 +1,74 @@
+name: release
+# Fills a GitHub release from CHANGELOG.md, so no release is hand-typed.
+#
+# Pushing a tag vX.Y.Z creates the release for it. Running this by hand ("Run workflow" on
+# the Actions tab, with a tag) rewrites the notes of a release that already exists, which is
+# how a release published before this file existed gets its notes.
+#
+# The notes are the tag's section of CHANGELOG.md plus the one thing that file cannot hold:
+# the commit SHA to pin. A commit cannot contain its own hash, so the SHA is resolved here,
+# from the tag, after the tag exists.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)write the notes for, e.g. v1.2.2'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Write the notes and publish them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through env, never interpolated into the script: a tag name is text someone typed.
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TAG' is not a release tag like v1.2.3"; exit 1; }
+          git fetch --force --tags origin
+          sha="$(git rev-list -n1 "refs/tags/$TAG")" || { echo "::error::tag $TAG does not exist"; exit 1; }
+
+          # On a tag push the checkout IS the tagged commit, so its CITATION.cff must name the
+          # tag. A release has to declare its own version before it is tagged (README.md,
+          # Releases). A manual run reads the default branch instead, whose version is newer.
+          if [ "$EVENT" = push ]; then
+            cff="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' CITATION.cff)"
+            [ "v$cff" = "$TAG" ] || { echo "::error::CITATION.cff says $cff but the tag is $TAG. Do not publish; fix the version first."; exit 1; }
+          fi
+
+          scripts/release/notes.sh "$TAG" > notes.md
+          {
+            echo
+            echo '### Pin this'
+            echo
+            echo "Commit \`$sha\`"
+            echo
+            echo '```yaml'
+            echo "    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@$sha # $TAG"
+            echo '    with:'
+            echo "      gates_ref: $sha # $TAG"
+            echo '```'
+            echo
+            echo 'Use the same SHA for the `review.yml` line, if you run the reviewer. Pin the SHA, never the tag: a tag is a name that can move.'
+          } >> notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md
+          fi
