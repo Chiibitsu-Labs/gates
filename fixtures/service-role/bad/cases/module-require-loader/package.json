@@ -1,1 +1,1 @@
-{ "name": "fixture-module-require-loader", "dependencies": { "next": "15.0.0" } }
+{ "name": "fixture-module-require-loader", "dependencies": { "next": "file:./not-installed" } }
