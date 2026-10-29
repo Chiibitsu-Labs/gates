@@ -320,9 +320,11 @@ done
 # ---------------------------------------------------------------------------
 NOTES="$HERE/scripts/release/notes.sh"
 nt="$(mktemp -d)"
-printf '## v9.9.9: H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n' > "$nt/missing-heading.md"
-printf '## v9.9.9: H\n### What changed\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/empty-heading.md"
+printf '## v9.9.9 (2026-01-01): H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n' > "$nt/missing-heading.md"
+printf '## v9.9.9 (2026-01-01): H\n### What changed\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/empty-heading.md"
 printf '## v9.9.9 (2026-01-01)\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-headline.md"
+printf '## v9.9.9: H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-date.md"
+printf '## v9.9.9 (soon): H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/bad-date.md"
 printf '## v9.9.90: H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-section.md"
 notes_ok=1
 for f in "$nt"/*.md; do
@@ -331,7 +333,7 @@ for f in "$nt"/*.md; do
   fi
 done
 rm -rf "$nt"
-[ "$notes_ok" = 1 ] && echo "ok  release notes check catches a missing section, headline, heading and answer"
+[ "$notes_ok" = 1 ] && echo "ok  release notes check catches a missing section, date, headline, heading and answer"
 ver="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$HERE/CITATION.cff")"
 if bash "$NOTES" "v$ver" >"$OUT" 2>&1; then
   echo "ok  CHANGELOG.md has complete notes for v$ver, the version CITATION.cff declares"
