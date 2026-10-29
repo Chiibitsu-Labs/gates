@@ -283,6 +283,18 @@ A release's `CITATION.cff` names its own version — that is the part that must 
 | v1.0.1 | `45834a1` | **Yes**, with one known false red. A workflow line like `uses: owner/repo@<40 hex> # docker://anything` is rejected as an unpinned container action, because this version tests the whole line for `docker://` instead of the parsed value. It errs toward a visible red, never a silent green, which is why the tag stands rather than moving. Fixed after the tag point. Review since then also found six more defects in the two gates rewritten at that tag point — including two outright false greens, and a denylist that made *any* repo with a non-empty one permanently red. All fixed after the tag; the fixes shipped in v1.0.2. Superseded — move to v1.0.4. |
 | v1.0.0 | `39f78d6` | **No.** Four gates could pass a violation: migrations-lint read a commented-out `enable row level security` as evidence; actions-sha-pinned missed two legal YAML spellings of the `uses` key; required-files and nextjs-env skipped every git-backed check inside a linked worktree or submodule. It also deleted a `.gates-selftest` directory in the tree it was inspecting. The tag stays where it is — a published tag on a gate toolkit does not get moved — and this table is the record. |
 
+### Cutting a release
+
+1. In the release pull request, set `version` and `date-released` in `CITATION.cff`, add a
+   `## vX.Y.Z (date): Headline` section at the top of `CHANGELOG.md` answering its four questions, and
+   add the row to the table above. `./selftest.sh` is red until the notes exist.
+2. Merge it, then tag the merged commit: `git tag -a vX.Y.Z -m vX.Y.Z <sha> && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` creates the GitHub release from that section and adds the
+   commit SHA to pin. It refuses to publish if `CITATION.cff` does not name the tag.
+
+To rewrite the notes of a release that already exists, run the `release` workflow by hand
+from the Actions tab with its tag.
+
 ## Known gaps
 
 Stated rather than papered over. Most are inherited from `check_secrets.py`'s own

@@ -312,6 +312,35 @@ for g in "$HERE"/gates/*.sh "$HERE"/gates/*.py; do
   fi
 done
 
+# ---------------------------------------------------------------------------
+# Release notes. The release workflow copies the CITATION.cff version's section of
+# CHANGELOG.md into the GitHub release, so a version with no notes must be red here, BEFORE
+# it is tagged — the same rule as the version itself (README.md, Releases). Proved able to
+# fail first, on throwaway changelogs, like every gate above.
+# ---------------------------------------------------------------------------
+NOTES="$HERE/scripts/release/notes.sh"
+nt="$(mktemp -d)"
+printf '## v9.9.9 (2026-01-01): H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n' > "$nt/missing-heading.md"
+printf '## v9.9.9 (2026-01-01): H\n### What changed\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/empty-heading.md"
+printf '## v9.9.9 (2026-01-01)\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-headline.md"
+printf '## v9.9.9: H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-date.md"
+printf '## v9.9.9 (soon): H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/bad-date.md"
+printf '## v9.9.90: H\n### What changed\nx\n### Should I upgrade\nx\n### What to pin\nx\n### Does anything break\nx\n' > "$nt/no-section.md"
+notes_ok=1
+for f in "$nt"/*.md; do
+  if bash "$NOTES" v9.9.9 "$f" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: release notes check PASSED '$(basename "$f" .md)' — it cannot fail"; notes_ok=0; bad=1
+  fi
+done
+rm -rf "$nt"
+[ "$notes_ok" = 1 ] && echo "ok  release notes check catches a missing section, date, headline, heading and answer"
+ver="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$HERE/CITATION.cff")"
+if bash "$NOTES" "v$ver" >"$OUT" 2>&1; then
+  echo "ok  CHANGELOG.md has complete notes for v$ver, the version CITATION.cff declares"
+else
+  echo "SELFTEST FAIL: no complete release notes for v$ver"; sed 's/^/    /' "$OUT"; bad=1
+fi
+
 echo
 if [ "$bad" = 0 ]; then
   echo "selftest: every gate was shown to fail, and none fails on this tree"

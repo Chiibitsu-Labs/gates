@@ -5,12 +5,15 @@
 README.md
 LICENSE
 CITATION.cff
+CHANGELOG.md
 selftest.sh
 caller-template.yml
 .ci-allowed-refs
 .github/workflows/gates.yml
 .github/workflows/selftest.yml
 .github/workflows/caller-smoke.yml
+.github/workflows/release.yml
+scripts/release/notes.sh
 # The gate files themselves are NOT listed here. gates/MANIFEST.txt is the one place their
 # names are written down, and selftest.sh asserts it against the gates/ directory in both
 # directions and checks each one is git-tracked. Listing them here as well made the same
