@@ -141,8 +141,10 @@ sends someone hunting for a bug in their code rather than a blind spot in the ga
 this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes six files:
 `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
 `security.yml` in the repo's workflows directory. The one other change it makes is to move
-the gates pins in a workflow that already calls this toolkit by `uses:`, and nothing else in
-that file. It never touches a `.gitignore`, a hook, a README or a board, never writes through
+the gates pins in a workflow that already calls this toolkit by `uses:` (and, with
+`--live-standing-orders`, to set that caller's `standing_orders_live` input), and nothing
+else in that file. A caller is recognised one way everywhere: a real `uses:` key, never a
+comment, naming exactly this owner and repo in any letter case, never a lookalike. It never touches a `.gitignore`, a hook, a README or a board, never writes through
 a symlink, and never commits or pushes.
 
 ```sh
@@ -156,7 +158,8 @@ trust, so the SHA comes from one of two places only: the Tier 1 caller's `gates_
 reads on the repo's **default branch** (never the working branch, which the change in hand
 can edit), or a SHA the founder states for a bump. Confirm `git rev-parse HEAD` before
 running. init refuses to run unless `--sha` equals its own checkout's `HEAD` and that
-checkout has no local changes or untracked files, which catches a wrong clone; it cannot vouch for itself, so the
+checkout has no local changes, untracked files or files hidden from `git status`
+(skip-worktree, assume-unchanged), which catches a wrong clone; it cannot vouch for itself, so the
 `rev-parse` you ran is the check that counts.
 
 - **Standing-orders files** carry one template-owned region between
@@ -179,12 +182,16 @@ checkout has no local changes or untracked files, which catches a wrong clone; i
   (the `project:` job is meant to be edited) and init says so, naming the release copy to
   compare against. A one-file caller in this repo's `caller-template.yml` shape is found
   and moved; no second caller is added beside it. The **security caller** is written only
-  when the repo has none and init never rewrites its pin: its `# main` hint is for Renovate.
-- **All or nothing:** any problem in any file stops the run before the first write.
+  when no workflow calls `Chiibitsu-Labs/security-checks`, and init never rewrites that pin:
+  its `# main` hint is for Renovate. A `security.yml` that calls something else stops the run.
+- **All or nothing:** any problem the plan can see in any file, a destination it cannot
+  write included, stops the run before the first write. If the file system changes under the
+  write itself, init says which files it had already written, never "nothing was written".
 - **A repo that reads the standing orders live** (`--live-standing-orders`, only where the
-  founder has ruled it so): its own `CLAUDE.md` and `AGENTS.md` must exist and carry no
-  marker or region, and init leaves them as they are; its `REVIEW.md` is handled as usual,
-  and its tier1 caller gets `standing_orders_live: true`.
+  founder has ruled it so): its own `CLAUDE.md` and `AGENTS.md`, where it has them, must
+  carry no marker or region, and init never writes or creates either; its `REVIEW.md` is
+  handled as usual, and every caller of this toolkit's `gates.yml` gets
+  `standing_orders_live: true`.
 
 **The check** runs in `gates.yml` after the gates, as `check` with the same proof-first rule:
 its `--selftest` runs every red case before it looks at your tree. It is red, with expected,
@@ -192,9 +199,13 @@ found and the paragraph to read, for a missing file among the three, a missing o
 marker, a marker behind or ahead of the release, the three files split between versions, a
 missing gates, `gates_ref` or review pin, a pin that is not a SHA, or the pins disagreeing.
 It asserts the markers and the pins, never the body: a current marker on a stale body is a
-reviewer's finding. With `standing_orders_live: true` it wants the repo's `CLAUDE.md` and
-`AGENTS.md` to exist and carry no marker or region; that input is the founder's to set,
-never a session's way to clear a red. `selftest.yml` does not run the check over this repo;
+reviewer's finding. It reads the expected version from its own checkout, which in CI is the
+pinned release. With `standing_orders_live: true` the version check does not apply to the
+repo's `CLAUDE.md` and `AGENTS.md`, but either one carrying a marker or a region is red; that
+input is the founder's to set, never a session's way to clear a red. **A pin bump across a
+protocol version is red on its own PR** (Renovate's included): the new release's check finds
+the old markers, and the fix is `init` from the new release at a SHA the founder states, in
+that same PR. `selftest.yml` does not run the check over this repo;
 `caller-smoke.yml` will, once its pin reaches a release that carries it (see the release
 checklist).
 
@@ -208,11 +219,12 @@ leaves out the time-ledger section, the vault-memory gotcha, the founder's timez
 the deploy-after-merge section, and every `owner/repo` locator the shape checks can see but
 `chiibitsu/vibeOS` and this org's public repos. `gates_init.py` lists exactly which shapes
 those checks match. They do not catch an unbackticked `acme/widget` in prose, a zone
-abbreviation, or any other person's or client's name, so reading the derived diff for those
+abbreviation the tz database does not list, or any other person's or client's name, so reading the derived diff for those
 is part of every release; it rewrites vibeOS paths as
 `chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
-resolve; and it adds a pointer line to each file's region, which sends a session that can
-read vibeOS to that repo's rules. `init/release/PROTOCOL` declares the version and the vibeOS
+resolve; it names the real `init` command where vibeOS's template says "gates init"; and it
+adds a pointer line to each file's region, which sends a session that can read vibeOS to
+that repo's rules and keeps the `init` steps as this copy's own. `init/release/PROTOCOL` declares the version and the vibeOS
 commit it came from.
 
 ## How to call it
@@ -391,7 +403,8 @@ In this order, in one sitting:
    this repo, which has no `CLAUDE.md` or `AGENTS.md`, keeps its own `REVIEW.md` as this
    repo's reviewer bar, and has no review caller (its `.github/workflows/review.yml` is the
    reusable workflow itself, so `init` refuses to write one there). No session can make that
-   bump green alone; it is a design question, filed as one, not a step to improvise.
+   bump green alone; it is a design question for the founder, named in the pull request that
+   added this check and not yet filed anywhere else, not a step to improvise.
 
 ## Known gaps
 

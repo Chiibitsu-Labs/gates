@@ -12,10 +12,11 @@
 **Protocol version: vibeOS docs/02 v8.2** (this file instantiated `<YYYY-MM-DD>`). Once
 this repo pins a gates release that declares a version (vibeOS repo-bootstrap slice 2), this
 line must equal it and Tier 1 holds it there; until then nothing checks it. Repairing it is
-not a reviewer's job — `CLAUDE.md`'s Protocol version paragraph has the steps (in a repo that
-reads the standing orders live, `chiibitsu/vibeOS:templates/claude-md.md`'s).
+not a reviewer's job — `CLAUDE.md`'s Protocol version paragraph has the steps (in a repo that reads the standing orders live: `python3 <a clone of
+Chiibitsu-Labs/gates at the pinned SHA>/init/gates_init.py init . --sha <that SHA>
+--live-standing-orders`, never a copy by hand from vibeOS).
 
-**The pointer line.** A session that can read `chiibitsu/vibeOS` also follows that repo's `chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its repo-specific gotchas), never its placeholders, at its published head, never a checkout's working tree, a branch or a fork (`chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09). Where the two differ, the stricter rule wins; where neither is stricter, vibeOS's does. A session that cannot read `chiibitsu/vibeOS` skips this paragraph.
+**The pointer line.** A session that can read `chiibitsu/vibeOS` also follows that repo's `chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its repo-specific gotchas), never its placeholders, at its published head, never a checkout's working tree, a branch or a fork (`chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09). Where the two differ, the stricter rule wins; where neither is stricter, vibeOS's does. A session that cannot read `chiibitsu/vibeOS` skips this paragraph. The steps for running `init` and repairing these three files are this copy's to state: where that template words the same repair without the command, follow the command here. The bound reviewer reads only this file, so for it every rule is still the ones written out below; this paragraph adds that template's rules only for a session reviewer that can read it.
 
 This file is instructions, not context. Referenced files are not pulled in, so every rule that
 must be followed is written out below.

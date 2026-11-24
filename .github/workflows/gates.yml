@@ -29,9 +29,9 @@ on:
       standing_orders_live:
         description: >-
           true only in a repo the founder has ruled reads vibeOS's template live (vibeOS
-          canon/decisions.md, 2026-11-09). The check then wants that repo's CLAUDE.md and
-          AGENTS.md to exist and carry NO marker and no region, and is red if either does; its
-          REVIEW.md is checked as usual. A session never sets this to clear a red: it is gate
+          canon/decisions.md, 2026-11-09). The version check then does not apply to that
+          repo's CLAUDE.md and AGENTS.md, but is red if either carries a marker or a region;
+          its REVIEW.md is checked as usual. A session never sets this to clear a red: it is gate
           configuration, and setting it is the founder's call for that repo.
         required: false
         type: boolean
