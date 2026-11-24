@@ -995,15 +995,19 @@ def derive_text(name, text, label):
                          "a citation in a way _locators does not rewrite."
                          % (name, ", ".join(sorted(set(bare)))))
         text = _insert_pointer(text, name)
-    elif name != SECURITY[1]:
-        # The callers' pin label names the release being cut (CITATION.cff), never the one
-        # vibeOS's template was last bumped to. Every pin must already be in init's form.
-        pins, bad, _, _ = scan(text)
-        want = ["gates", "gates_ref"] if name == TIER1[1] else ["review"]
-        if bad or [k for _, k, _ in pins] != want:
+    else:
+        # Every caller template must already carry its call in the form init reads, the
+        # security caller included: init writes these files as they are, and the check is red
+        # on any other form.
+        pins, bad, sec_bad, security = scan(text)
+        want = {TIER1[1]: ["gates", "gates_ref"], REVIEWC[1]: ["review"], SECURITY[1]: []}[name]
+        if bad or sec_bad or [k for _, k, _ in pins] != want or security != (name == SECURITY[1]):
             raise refuse("derive-caller-form", "derive: templates/%s does not carry exactly %s in "
-                         "the form init writes" % (name, " and ".join(want)))
-        text = CALLER_NOTE + move_pins(text, None, label)
+                         "the form init writes" % (name, " and ".join(want) or "one security call"))
+        if name != SECURITY[1]:
+            # The pin label names the release being cut (CITATION.cff), never the one vibeOS's
+            # template was last bumped to.
+            text = CALLER_NOTE + move_pins(text, None, label)
     return text
 
 
@@ -1785,6 +1789,15 @@ def selftest():
     ok(fires("derive-paragraph", lambda: _in_paragraph("x\n\ny", "**Missing lead**", [])), "an edit whose paragraph is gone stops the derivation")
     ok(fires("derive-caller-form", lambda: derive_text(TIER1[1], G.replace("uses: ", 'uses: "').replace("\n", '"\n') + Rf, label)),
        "derive refuses a caller template whose pins are not in init's form")
+    sec_t = read(os.path.join(RELEASE, SECURITY[1]))
+    sec_sha = SHA40.search(sec_t).group(0)
+    ok(derive_text(SECURITY[1], sec_t, label) == sec_t, "derive passes the committed security caller through unchanged")
+    for why, bad_t in (("pinned to a branch", sec_t.replace("@" + sec_sha, "@main")),
+                       ("quoted", sec_t.replace("uses: Chiibitsu-Labs/security-checks", 'uses: "Chiibitsu-Labs/security-checks').replace(sec_sha + " # main", sec_sha + '" # main')),
+                       ("with no security call at all", "\n".join(l for l in sec_t.split("\n") if "security-checks/.github" not in l)),
+                       ("that also calls the toolkit", sec_t + G)):
+        ok(bad_t != sec_t and fires("derive-caller-form", lambda: derive_text(SECURITY[1], bad_t, label)),
+           "derive refuses a security caller template %s" % why)
     ok(fires("derive-version-mismatch", lambda: derive_all(
         {"agents-md.md": plain.replace("docs/02 " + relv, "docs/02 " + behind, 1)}, rel, label, names=("agents-md.md",))),
        "derive refuses a template whose marker is not the version docs/02 declares")
