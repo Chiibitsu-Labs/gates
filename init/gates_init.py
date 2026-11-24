@@ -827,12 +827,12 @@ def check(target, release=RELEASE):
                 "only in the form init writes (%s), found another form. Fix or remove the line "
                 "by hand; init does not repair a caller."
                 % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))
-        if pins:
-            try:  # read the way init reads it, so a green caller is one init can move
-                load(guard(target, p), p)
-            except Problem as e:
-                red(fails, "caller-unreadable", "%s: expected a caller init can read and move; "
-                    "init refuses this one: %s Repair it by hand; init does not." % (show(p), e))
+        try:  # init reads every workflow file this way and stops on one it refuses
+            load(guard(target, p), p)
+        except Problem as e:
+            red(fails, "caller-unreadable", "%s: expected a workflow file init can read; init "
+                "refuses this one, and with it the whole run: %s Repair it by hand; init does "
+                "not." % (show(p), e))
         loose = unpaired(text, pins)
         if loose:
             red(fails, "pin-unpaired", "%s line %s: expected each gates.yml call to have exactly "
@@ -1766,6 +1766,9 @@ def selftest():
             ("a file with a region that is a symlink", "AGENTS.md", lambda d: linked(d, "AGENTS.md"), "region-unreadable", "symlink"),
             ("mixed line endings in a caller", TIER1[0], lambda d: rawbytes(d, TIER1[0], crlf3), "caller-unreadable", "mixed-eol"),
             ("a caller that is a symlink", REVIEWC[0], lambda d: linked(d, REVIEWC[0]), "caller-unreadable", "symlink"),
+            ("the security caller as a symlink", SECURITY[0], lambda d: linked(d, SECURITY[0]), "caller-unreadable", "symlink"),
+            ("mixed line endings in a workflow that calls nothing of the toolkit's", WF + "/deploy.yml",
+             lambda d: write(d, WF + "/deploy.yml", "name: d\r\non: push\njobs: {}\n"), "caller-unreadable", "mixed-eol"),
             ("two gates_refs under one with", TIER1[0], lambda d: write(d, TIER1[0], raw(d, TIER1[0]).replace(ref_line, ref_line + "\n" + ref_line, 1)), "pin-unpaired", "pin-unpaired")):
         d = fresh("agree-read")
         init(d)

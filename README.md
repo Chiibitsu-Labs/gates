@@ -183,7 +183,7 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   or one outside the region is refused, and a rewritten file keeps its permission bits.
   The check reads a file that has a region the way init does, so it is red on whatever init
   refuses there: the file itself (a symlink, mixed line endings), its region, or a marker
-  outside it. It reads a caller that carries a pin the same way. A file with no region at
+  outside it. It reads every workflow file the same way. A file with no region at
   all is the one exception, below.
 - **A file with no region is not adopted, and a repo that reads the standing orders live is
   not handled.** Both are refused with a message. Adoption and the live-read case are a
@@ -451,7 +451,8 @@ shapes follow from that, and both apply to the security caller too:
 - A line in exactly the accepted form inside a multi-line scalar (a `run: |` script that
   prints a `uses:` line, say, or a quoted string that runs over several lines) is
   indistinguishable from a real call or `gates_ref`: init would move it and the check would
-  count it, and pair it.
+  count it, and pair it. The same holds for such lines under a key that is not a job (a
+  matrix entry, say).
 - A call or a `gates_ref` key spelled with YAML's own escapes or structure, so that the
   toolkit's path or the key does not appear on the line as text (`.github\/workflows`,
   `"gates\x5fref"`, a double-quoted line continuation, an explicit `? gates_ref` key), is
