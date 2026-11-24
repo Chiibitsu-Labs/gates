@@ -26,16 +26,6 @@ on:
           exists to refuse.
         required: true
         type: string
-      standing_orders_live:
-        description: >-
-          true only in a repo the founder has ruled reads vibeOS's template live (vibeOS
-          canon/decisions.md, 2026-11-09). The version check then does not apply to that
-          repo's CLAUDE.md and AGENTS.md, but is red if either carries a marker or a region;
-          its REVIEW.md is checked as usual. A session never sets this to clear a red: it is gate
-          configuration, and setting it is the founder's call for that repo.
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -85,16 +75,11 @@ jobs:
         run: ./gates-toolkit/selftest.sh "$GITHUB_WORKSPACE/repo"
 
       # The standing-orders version check: CLAUDE.md, AGENTS.md and REVIEW.md carry the
-      # protocol version this release declares, and the gates pins agree. Same rule as the
-      # gates above: its own --selftest proves every red case first, then it runs on the tree.
+      # protocol version this release declares, and the gates pins are in init's form and
+      # agree. Same rule as the gates above: its own --selftest runs first, and fails unless
+      # every refusal and every red it names fired; then the check runs on the tree.
       - name: Standing orders match this release
-        env:
-          LIVE: ${{ inputs.standing_orders_live }}
         run: |
           set -euo pipefail
           python3 -I ./gates-toolkit/init/gates_init.py --selftest
-          if [ "$LIVE" = true ]; then
-            python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo" --live-standing-orders
-          else
-            python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
-          fi
+          python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"

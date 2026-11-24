@@ -141,11 +141,9 @@ sends someone hunting for a bug in their code rather than a blind spot in the ga
 this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes six files:
 `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
 `security.yml` in the repo's workflows directory. The one other change it makes is to move
-the gates pins in a workflow that already calls this toolkit by `uses:` (and, with
-`--live-standing-orders`, to set that caller's `standing_orders_live` input), and nothing
-else in that file. A caller is recognised one way everywhere: a real `uses:` key, never a
-comment, naming exactly this owner and repo in any letter case, never a lookalike. It never touches a `.gitignore`, a hook, a README or a board, never writes through
-a symlink, and never commits or pushes.
+the gates pin lines in a workflow that already calls this toolkit, and nothing else in that
+file. It never touches a `.gitignore`, a hook, a README or a board, never writes through a
+symlink or a hard link, and never commits or pushes.
 
 ```sh
 git clone https://github.com/Chiibitsu-Labs/gates && git -C gates checkout <sha>
@@ -159,73 +157,86 @@ reads on the repo's **default branch** (never the working branch, which the chan
 can edit), or a SHA the founder states for a bump. Confirm `git rev-parse HEAD` before
 running. init refuses to run unless `--sha` equals its own checkout's `HEAD` and that
 checkout has no local changes, untracked files or files hidden from `git status`
-(skip-worktree, assume-unchanged), which catches a wrong clone; it cannot vouch for itself, so the
-`rev-parse` you ran is the check that counts.
+(skip-worktree, assume-unchanged), which catches a wrong clone; it cannot vouch for itself,
+so the `rev-parse` you ran is the check that counts.
+
+**One rule for every match: detect wide, accept narrow, refuse the rest.** A line is
+*detected* by a loose test and *accepted* only in the one exact form init itself writes.
+Detected and not accepted is refused by init and red in the check, so no spelling has to be
+recognised to be safe.
 
 - **Standing-orders files** carry one template-owned region between
-  `<!-- gates:template-owned:begin -->` and `<!-- gates:template-owned:end -->`. init
-  rewrites the region and keeps every byte outside it. A file with no region, more than one
-  marker of either kind, the end before the begin, a marker in a fenced block, or a marker
-  not alone on its line is reported and left untouched.
-- **Adopting a file with no region** (`--adopt`, once): for a file with no marker at all,
-  init inserts the region after the first `# ` heading (after any frontmatter, when there is
-  no heading) and keeps every existing line. The stale template text still outside it is not
-  guessed at: it shows in the diff, and the same PR deletes what repeats a template rule,
-  keeps what it cannot tell apart and lists that for the founder. An old Protocol version
-  line left outside is named, and the check stays red on it until it goes.
+  `<!-- gates:template-owned:begin -->` and `<!-- gates:template-owned:end -->`, each alone
+  on its line at column 0. init rewrites the region and keeps every byte outside it, in the
+  file's own line ending. Any line that carries the marker text in another way (indented,
+  with other text, with trailing spaces) is refused, and so is a file with no region, more
+  than one marker of either kind, the end before the begin, a marker in a fenced block, mixed
+  line endings, or bytes that are not UTF-8.
+- **A file with no region is not adopted, and a repo that reads the standing orders live is
+  not handled.** Both are refused with a message. Adoption and the live-read case are a
+  later slice's (the founder's ruling on this pull request; vibeOS repo-bootstrap spec, open
+  item 1). Until that slice, such a repo cannot move its pin to a release that carries the
+  check without going red.
+- **Callers.** init detects any line that carries this toolkit's workflow path (its old
+  name included, in any letter case), and any `gates_ref` key in a file that has one. It
+  accepts exactly `uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<40-hex SHA>`
+  (or `review.yml`) and `gates_ref: <40-hex SHA>`, each alone on its line, unquoted, with
+  any trailing comment. A quoted or spaced key, a flow mapping, a tag or branch pin, another
+  letter case, a lookalike owner or a commented-out call is detected, not accepted, and
+  stops the run: fix the line by hand first. The security caller is read the same way.
 - **When a pin moves:** to the SHA of the checkout init runs from, and only forward. An
-  existing pin moves only if that checkout's history contains it; a newer pin, an unknown
-  one, a pin by tag or branch, or a marker ahead of this release stops the run with nothing
-  written. Each pin gets the release's version label, `CITATION.cff`'s, beside it. So running an
-  older release over a newer pin changes nothing.
-- **Callers that already exist:** only their gates pins move; their bodies are the repo's
-  (the `project:` job is meant to be edited) and init says so, naming the release copy to
-  compare against. A one-file caller in this repo's `caller-template.yml` shape is found
-  and moved; no second caller is added beside it. The **security caller** is written only
-  when no workflow calls `Chiibitsu-Labs/security-checks`, and init never rewrites that pin:
-  its `# main` hint is for Renovate. A `security.yml` that calls something else stops the run.
-- **All or nothing:** any problem the plan can see in any file, a destination it cannot
-  write included, stops the run before the first write. If the file system changes under the
-  write itself, init says which files it had already written, never "nothing was written".
-- **A repo that reads the standing orders live** (`--live-standing-orders`, only where the
-  founder has ruled it so): its own `CLAUDE.md` and `AGENTS.md`, where it has them, must
-  carry no marker or region, and init never writes or creates either; its `REVIEW.md` is
-  handled as usual, and every caller of this toolkit's `gates.yml` gets
-  `standing_orders_live: true`.
+  accepted pin moves only if that checkout's history contains it; a newer or unknown pin, or
+  a marker ahead of this release, stops the run. Each moved line gets this release's version
+  label in place of whatever comment it had.
+- **Callers that already exist:** only their pin lines change; their bodies are the repo's
+  (the `project:` job is meant to be edited). A one-file caller in this repo's
+  `caller-template.yml` shape is found and moved; no second caller is added beside it. A
+  `tier1.yml` or `review.yml` of the repo's own that does not call the toolkit stops the run.
+- **The security caller** is written only when no workflow calls
+  `Chiibitsu-Labs/security-checks` and no `security.yml` exists. init never rewrites that
+  pin (its `# main` hint is for Renovate), and a fresh one still needs its header's step 1.
+  A `security.yml` of the repo's own is left alone, and init says it wrote no security caller.
+- **All or nothing:** any refusal in any file stops the run before a write. Writes go to
+  temporary files first and are then moved into place; if a move fails, init names the files
+  it had already moved, never "nothing was written". TARGET must be an existing directory.
 
-**The check** runs in `gates.yml` after the gates, as `check` with the same proof-first rule:
-its `--selftest` runs every red case before it looks at your tree. It is red, with expected,
-found and the paragraph to read, for a missing file among the three, a missing or duplicated
-marker, a marker behind or ahead of the release, the three files split between versions, a
-missing gates, `gates_ref` or review pin, a pin that is not a SHA, or the pins disagreeing.
-It asserts the markers and the pins, never the body: a current marker on a stale body is a
-reviewer's finding. It reads the expected version from its own checkout, which in CI is the
-pinned release. With `standing_orders_live: true` the version check does not apply to the
-repo's `CLAUDE.md` and `AGENTS.md`, but either one carrying a marker or a region is red; that
-input is the founder's to set, never a session's way to clear a red. **A pin bump across a
+**The check** runs in `gates.yml` after the gates: its `--selftest` first, then `check` on
+your tree. It is red, with expected, found and the paragraph to read, for a missing or
+unreadable file among the three, a missing, unreadable or duplicated marker, a marker behind
+or ahead of the release, the three files split between versions, a toolkit or security line
+that is not in init's form, a missing gates, `gates_ref` or review pin, a gates call without
+its `gates_ref`, or the pins disagreeing. It asserts the markers and the pins, never the
+body: a current marker on a stale body is a reviewer's finding. It reads the expected
+version from its own checkout, which in CI is the pinned release. **A pin bump across a
 protocol version is red on its own PR** (Renovate's included): the new release's check finds
 the old markers, and the fix is `init` from the new release at a SHA the founder states, in
-that same PR. `selftest.yml` does not run the check over this repo;
-`caller-smoke.yml` will, once its pin reaches a release that carries it (see the release
-checklist).
+that same PR. `selftest.yml` does not run the check over this repo; `caller-smoke.yml` will,
+once its pin reaches a release that carries it (see the release checklist).
+
+**Every refusal and every red is named** in `REFUSALS` and `REDS` in the script. Its
+`--selftest` fails unless each one fired during the run and the two lists match the code by
+name, in both directions. A guard that is switched off, or added without a case, turns the
+selftest red.
 
 **The team-safe copy.** This repository is public, so it never carries vibeOS's own
-`chiibitsu/vibeOS:templates/claude-md.md`. `init/release/` holds a copy derived from vibeOS's templates by
-`gates_init.py derive <vibeOS checkout>`: fixed edits, each asserted to match, then shape
-checks over the result. No edit and no check spells out a private string: each finds its text
-by structure, and the founder's name is matched by digest, which keeps its spelling out of
-the source (a short name's digest is guessable, so it hides the literal, not the name). It
-leaves out the time-ledger section, the vault-memory gotcha, the founder's timezone and name,
-the deploy-after-merge section, and every `owner/repo` locator the shape checks can see but
-`chiibitsu/vibeOS` and this org's public repos. `gates_init.py` lists exactly which shapes
-those checks match. They do not catch an unbackticked `acme/widget` in prose, a zone
-abbreviation the tz database does not list, or any other person's or client's name, so reading the derived diff for those
-is part of every release; it rewrites vibeOS paths as
+`chiibitsu/vibeOS:templates/claude-md.md`. `init/release/` holds a copy derived from vibeOS's
+templates by `gates_init.py derive <vibeOS checkout>`: targeted edits, each asserted to
+match, then shape checks over the result. No edit and no check spells out a private string:
+each finds its text by structure, and the founder's name is matched by digest, which keeps
+its spelling out of the source (a short name's digest is guessable, so it hides the literal,
+not the name). The copy leaves out the time-ledger section, the vault-memory gotcha, the
+founder's timezone and name, and the deploy-after-merge section. It rewrites vibeOS paths as
 `chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
-resolve; it names the real `init` command where vibeOS's template says "gates init"; and it
-adds a pointer line to each file's region, which sends a session that can read vibeOS to
-that repo's rules and keeps the `init` steps as this copy's own. `init/release/PROTOCOL` declares the version and the vibeOS
-commit it came from.
+resolve; it names the real `init` command where vibeOS's template says "gates init"; it
+tells a session that the callers' SHAs are already set; and it adds a pointer line to each
+file's region, which sends a session that can read vibeOS to that repo's rules and keeps
+the `init` steps as this copy's own. `gates_init.py` lists exactly which shapes the checks
+match: `owner/repo` locators in five positions against an allowlist, every time zone name
+in `init/tznames.txt` (vendored public data) except the bare words UTC and GMT, UTC offsets,
+the name, the ledger heading and the vault lead. They do not catch an unbackticked
+`acme/widget` in prose, a zone name or abbreviation the vendored list does not hold, or any
+other person's or client's name, so reading the derived diff for those is part of every
+release. `init/release/PROTOCOL` declares the version and the vibeOS commit it came from.
 
 ## How to call it
 
@@ -383,21 +394,23 @@ In this order, in one sitting:
    says why).
 2. **Re-derive the team-safe copy** from vibeOS's published head: fetch, check out
    `origin/main`, then `python3 init/gates_init.py derive <that checkout>`. It refuses a
-   checkout with local changes or one not at `origin/main`, and it fails rather than guess
-   when a template moved under one of its edits; fix the edit, never the check. It labels
-   the callers' pins with step 1's version. Read the diff of `init/release/` for anything the
-   shape checks cannot see (people's and clients' names, products), and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
+   checkout that is not clean, not from `chiibitsu/vibeOS`, or not at `origin/main`, and it
+   fails rather than guess when a template moved under one of its edits; fix the edit, never
+   the check. It labels the callers' pins with step 1's version. Read the diff of
+   `init/release/` for anything the shape checks cannot see (people's and clients' names,
+   products), and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
 3. Run `./selftest.sh .` and `python3 init/gates_init.py --selftest`; merge; tag; add the row
    below.
-4. **Re-instantiate both template repos from the new tag in the same sitting** (vibeOS's
-   repo-bootstrap spec, Behavior C.3): run `init` in each from a clone at the new release's
-   SHA, the one the founder states for the bump (the standing orders those repos carry allow
-   no other source: never a tag name), with `--live-standing-orders` for the Next.js app
-   template. Read the diff and open the PR.
-   Announce the release only once both have merged: until then a repo created from a
-   template is born behind. Every other repo moves when a session runs `init` from the new
-   release; until then its pin, and so its check, is unchanged. "Red when stale" means
-   stale against the pinned release, never against vibeOS's head.
+4. **Re-instantiate the blank template repo from the new release in the same sitting**
+   (vibeOS's repo-bootstrap spec, Behavior C.3): run `init` in it from a clone at the new
+   release's SHA, the one the founder states for the bump (the standing orders that repo
+   carries allow no other source: never a tag name). Read the diff and open the PR. Announce
+   the release only once it has merged: until then a repo created from the template is born
+   behind. The Next.js app template reads the standing orders live, which this release's
+   `init` does not handle; it stays on its current pin until the slice that adds that. Every
+   other repo moves when a session runs `init` from the new release; until then its pin, and
+   so its check, is unchanged. "Red when stale" means stale against the pinned release,
+   never against vibeOS's head.
 5. **Do not move `caller-smoke.yml`'s pin** to a release that carries the standing-orders
    check until the founder rules how this repo meets it. Measured: that check then runs over
    this repo, which has no `CLAUDE.md` or `AGENTS.md`, keeps its own `REVIEW.md` as this
@@ -407,6 +420,12 @@ In this order, in one sitting:
    added this check and not yet filed anywhere else, not a step to improvise.
 
 ## Known gaps
+
+**`gates init` and the standing-orders check read workflows line by line, not as YAML.** A
+line in exactly the accepted form inside a block scalar (a `run: |` script that prints a
+`uses:` line, say) is indistinguishable from a real call without a YAML parser: init would
+move it and the check would count it. Every other spelling is detected and refused, so the
+gap is that one shape. The same reading applies to the security caller.
 
 Stated rather than papered over. Most are inherited from `check_secrets.py`'s own
 header, which is the honest account of what that scanner does not do.

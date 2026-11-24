@@ -1,3 +1,6 @@
+# Written by `gates init`: the toolkit SHAs in this file are already set to the release
+# init ran from, so the header's step about replacing them is done. Do not redo it by
+# hand, and move them later only by running init from a newer release.
 # Tier 1 — the caller. Drop at .github/workflows/tier1.yml.
 #
 # BEFORE YOU COMMIT THIS FILE — six things, each explained in the block it points at:

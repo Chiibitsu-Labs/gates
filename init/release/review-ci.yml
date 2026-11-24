@@ -1,3 +1,6 @@
+# Written by `gates init`: the toolkit SHAs in this file are already set to the release
+# init ran from, so the header's step about replacing them is done. Do not redo it by
+# hand, and move them later only by running init from a newer release.
 # Draft-stage review (docs/04 Tier 2) — the caller. Drop at .github/workflows/review.yml.
 #
 # SEPARATE FILE, AND THE REASON IS NOT THE ONE YOU MIGHT GUESS. Every job produces its own

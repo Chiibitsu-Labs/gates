@@ -50,8 +50,7 @@ and a stale copy looks exactly like a current one — the version line is the on
 **Except a repo that reads `chiibitsu/vibeOS:templates/claude-md.md` live** (the founder's Next.js app template and the apps
 made from it, which the founder names; no repo qualifies by resembling one — `chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09): its standing orders carry no marker on
 purpose and are never re-instantiated from it. In such a repo, read that file as the current standing orders and skip the marker check above for its `CLAUDE.md` and `AGENTS.md`;
-its `REVIEW.md` keeps its marker, and `python3 <the clone>/init/gates_init.py init . --sha <that SHA>
---live-standing-orders`, run in this repo's root from a clone at the pinned SHA, repairs it (and moves the caller pins to that SHA).
+its `REVIEW.md` keeps its marker, and this release's `init` and its check do not handle such a repo yet (a later slice does); until then its repair is the founder's to direct, never a copy by hand from vibeOS, whose bare paths a reference gate reads as this repo's own.
 
 **And a repo with no `CLAUDE.md` or `AGENTS.md` of its own** is meant to take `chiibitsu/vibeOS:templates/claude-md.md`, at
 vibeOS's published head, as its standing orders until it has some (the founder, 2026-11-11: "we need
