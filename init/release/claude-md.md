@@ -47,21 +47,19 @@ and a stale copy looks exactly like a current one — the version line is the on
 
 **The pointer line.** A session that can read `chiibitsu/vibeOS` also follows that repo's `chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its repo-specific gotchas), never its placeholders, at its published head, never a checkout's working tree, a branch or a fork (`chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09). Where the two differ, the stricter rule wins; where neither is stricter, vibeOS's does. A session that cannot read `chiibitsu/vibeOS` skips this paragraph.
 
-**Except a repo that reads this file live** (the founder's Next.js app template and the apps
-made from it — `chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09): its standing orders carry no marker on
-purpose and are never re-instantiated from this file. In such a repo, read this file as the
-current standing orders and skip the marker check above for its `CLAUDE.md` and `AGENTS.md`;
+**Except a repo that reads `chiibitsu/vibeOS:templates/claude-md.md` live** (the founder's Next.js app template and the apps
+made from it, which the founder names; no repo qualifies by resembling one — `chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09): its standing orders carry no marker on
+purpose and are never re-instantiated from it. In such a repo, read that file as the current standing orders and skip the marker check above for its `CLAUDE.md` and `AGENTS.md`;
 its `REVIEW.md` keeps its marker, and the by-hand steps above repair that one file.
 
-**And a repo with no `CLAUDE.md` or `AGENTS.md` of its own** is meant to take this file, at
+**And a repo with no `CLAUDE.md` or `AGENTS.md` of its own** is meant to take `chiibitsu/vibeOS:templates/claude-md.md`, at
 vibeOS's published head, as its standing orders until it has some (the founder, 2026-11-11: "we need
 ALL repos to follow the same rules"). Nothing in such a repo loads it: a session reaches it only
-through the founder's own preferences, once they point here.
+through the founder's own preferences, once they point there.
 
-**vibeOS reads this file as its own standing orders too**: its `CLAUDE.md` and `AGENTS.md`
-point here rather than copying it. So a rule changed here changes in vibeOS as well. **In
+**vibeOS reads that template, the source of this copy, as its own standing orders**: its `CLAUDE.md` and `AGENTS.md` point there rather than copying it. **In
 vibeOS, `CLAUDE.md`'s "Where vibeOS differs from the template" governs and is not a conflict to
-stop on:** it says which of this file's product-repo rules do not apply there and why. vibeOS's
+stop on:** it says which of the template's product-repo rules do not apply there and why. vibeOS's
 `AGENTS.md` has no template-owned region; its rules for agents are "Reviewing a change" onwards.
 
 **Read `AGENTS.md` too, every session.** Its section below its own template-owned region holds

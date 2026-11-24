@@ -28,9 +28,11 @@ on:
         type: string
       standing_orders_live:
         description: >-
-          true only in a repo whose CLAUDE.md and AGENTS.md read vibeOS's template live and
-          carry no marker on purpose (vibeOS canon/decisions.md, 2026-11-09): the version check
-          then skips those two files. Its REVIEW.md is checked either way.
+          true only in a repo the founder has ruled reads vibeOS's template live (vibeOS
+          canon/decisions.md, 2026-11-09). The check then wants that repo's CLAUDE.md and
+          AGENTS.md to exist and carry NO marker and no region, and is red if either does; its
+          REVIEW.md is checked as usual. A session never sets this to clear a red: it is gate
+          configuration, and setting it is the founder's call for that repo.
         required: false
         type: boolean
         default: false
@@ -90,9 +92,9 @@ jobs:
           LIVE: ${{ inputs.standing_orders_live }}
         run: |
           set -euo pipefail
-          python3 ./gates-toolkit/init/gates_init.py --selftest
+          python3 -I ./gates-toolkit/init/gates_init.py --selftest
           if [ "$LIVE" = true ]; then
-            python3 ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo" --live-standing-orders
+            python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo" --live-standing-orders
           else
-            python3 ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
+            python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
           fi
