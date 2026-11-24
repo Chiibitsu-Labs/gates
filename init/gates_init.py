@@ -61,11 +61,11 @@ END = "<!-- gates:template-owned:end -->"
 MARKER_KEY = "gates:template-owned:"
 
 # The marker line: `**Protocol version: vibeOS docs/02 v8.2** (this file instantiated `<date>`)`.
-MARKER = re.compile(r"\*\*Protocol version: vibeOS docs/02 v(\d+)\.(\d+)(?:\.(\d+))?\*\*")
+MARKER = re.compile(r"\*\*Protocol version: vibeOS docs/02 v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?\*\*")
 # Detect wide: any line that starts a Protocol version claim counts as a marker line, so an
 # older-style or mangled one is a marker that is there and wrong, never "no marker".
 MARKER_LOOSE = re.compile(r"\*\*Protocol version:")
-DATE = re.compile(r"(\(this file instantiated `)(<YYYY-MM-DD>|\d{4}-\d{2}-\d{2})(`\))")
+DATE = re.compile(r"(\(this file instantiated `)(<YYYY-MM-DD>|[0-9]{4}-[0-9]{2}-[0-9]{2})(`\))")
 
 STANDING = (  # (path in the repo, file in init/release)
     ("CLAUDE.md", "claude-md.md"),
@@ -81,8 +81,12 @@ SHA40 = re.compile(r"[0-9a-f]{40}")
 # Detect wide: the toolkit's (or its old name's) workflow path anywhere on a line, any case.
 TOOLKIT_MENTION = re.compile(r"(?i)chiibitsu(?:-labs)?/gates/\.github/workflows/")
 SECURITY_MENTION = re.compile(r"(?i)chiibitsu-labs/security-checks/\.github/workflows/")
-# ...and a `gates_ref` key in any spelling, in a file that mentions the toolkit.
-REF_MENTION = re.compile(r"(?:^|[{,])\s*(?:-\s*)?[\"']?gates_ref[\"']?\s*:", re.I)
+# ...and the word `gates_ref` anywhere on a line before any `#`, in any letter case, in a
+# file that mentions the toolkit: an anchored, tagged, quoted or flow-style key included.
+
+
+def ref_mention(line):
+    return "gates_ref" in line.split("#", 1)[0].lower()
 # Accept narrow: the whole line, exactly as init writes it. Any trailing comment is allowed
 # and is replaced with the release's label when the pin moves.
 USES_LINE = re.compile(r"( +uses: Chiibitsu-Labs/gates/\.github/workflows/(gates|review)\.yml@)"
@@ -102,8 +106,9 @@ REFUSALS = (
     "symlink", "not-a-directory", "not-a-file", "hard-link", "unreadable", "mixed-eol",
     "odd-line-break",
     "region-none", "region-many", "region-unpaired", "region-reversed", "region-fenced",
-    "region-fence-unclear", "region-not-col0", "marker-ahead",
-    "caller-noncanonical", "pin-not-ancestor", "caller-unrelated", "security-noncanonical",
+    "region-fence-unclear", "region-not-col0", "marker-shape", "marker-ahead",
+    "caller-noncanonical", "pin-unpaired", "pin-not-ancestor", "caller-unrelated",
+    "security-noncanonical",
     "write-prepare-failed", "write-failed", "release-no-protocol", "release-no-label",
     "derive-edit-count", "derive-paragraph", "derive-bare-path", "derive-no-marker",
     "derive-caller-form", "derive-leak", "derive-version-mismatch", "derive-no-protocol",
@@ -196,7 +201,7 @@ def read(path):
     return read_raw(path).lstrip("\ufeff").replace("\r\n", "\n")
 
 
-def guard(target, rel):
+def guard(target, rel, leaf=True):
     """Refuse a path init would write if it, or a directory on the way, is a symlink; if a
     directory on the way is a file; if the path is not a regular file; or if it is a file
     with a second hard link."""
@@ -206,9 +211,11 @@ def guard(target, rel):
         if os.path.islink(p):
             raise refuse("symlink", "%s: %s is a symlink; init never writes through one. Left "
                          "untouched." % (rel, "/".join(parts[:i + 1])))
-        if i < len(parts) - 1 and os.path.exists(p) and not os.path.isdir(p):
+        if (i < len(parts) - 1 or not leaf) and os.path.exists(p) and not os.path.isdir(p):
             raise refuse("not-a-directory", "%s: %s is not a directory, so init cannot write "
                          "there. Left untouched." % (rel, "/".join(parts[:i + 1])))
+    if not leaf:
+        return p
     if os.path.exists(p) and not os.path.isfile(p):
         raise refuse("not-a-file", "%s exists and is not a regular file. Left untouched." % rel)
     if os.path.isfile(p) and os.stat(p).st_nlink > 1:
@@ -248,20 +255,24 @@ def parse_region(text, rel="the file"):
     the shape. `text` is LF text. Detect wide: MARKER_KEY anywhere on a line. Accept narrow:
     the line is exactly BEGIN or END, at column 0, outside any fence."""
     lines = text.split("\n")
-    begins, ends, fences_above = [], [], 0
-    fences_total = sum(1 for l in lines if FENCE_ANYWHERE.search(l))
+    begins, ends, unclear, in_comment = [], [], 0, False
     for i, (line, fenced) in enumerate(zip(lines, fence_map(lines))):
         if MARKER_KEY not in line:
-            fences_above += bool(FENCE_ANYWHERE.search(line))
+            # fence_map reads fences the plain way. A Markdown renderer reads a fence run
+            # differently when it is not a plain fence line (after a list marker, in prose,
+            # indented four or more) or sits inside an HTML comment. One such line above a
+            # marker and the two readings may disagree about whether that marker is fenced.
+            runs = FENCE_ANYWHERE.findall(line)
+            if runs and not begins and (in_comment or len(runs) != 1 or not FENCE.match(line)):
+                unclear = unclear or i + 1
+            if "<!--" in line or in_comment:
+                in_comment = "-->" not in line.split("<!--")[-1]
             continue
-        if line in (BEGIN, END) and not fenced and (fences_above % 2 or fences_total % 2):
-            # fence_map reads fences the plain way; a fence opened on a list line or inside an
-            # HTML comment is read differently by a Markdown renderer. An odd number of lines
-            # carrying a fence run, above a marker or in the whole file, means the two
-            # readings may disagree about that marker.
-            raise refuse("region-fence-unclear", "%s: its code fences do not pair up (around "
-                         "line %d), so init cannot tell whether that marker is inside one. Left "
-                         "untouched." % (rel, i + 1))
+        if line in (BEGIN, END) and not fenced and unclear:
+            raise refuse("region-fence-unclear", "%s: line %d carries a code-fence run that is not "
+                         "a plain fence line (or sits in an HTML comment), so init cannot tell "
+                         "whether the marker at line %d is inside a fenced block. Left "
+                         "untouched." % (rel, unclear, i + 1))
         if line not in (BEGIN, END):
             raise refuse("region-not-col0", "%s: line %d carries region marker text but is not "
                          "exactly one marker, alone, at column 0. Left untouched." % (rel, i + 1))
@@ -271,7 +282,8 @@ def parse_region(text, rel="the file"):
         (begins if line == BEGIN else ends).append(i)
     if not begins and not ends:
         raise refuse("region-none", "%s: no template-owned region. This release's init does not "
-                     "adopt a file that has none; that is a later slice's. Left untouched." % rel)
+                     "adopt a file that has none, and does not handle a repo that reads the "
+                     "standing orders live; both are a later slice's. Left untouched." % rel)
     if len(begins) > 1 or len(ends) > 1:
         raise refuse("region-many", "%s: more than one region marker pair (%d begin, %d end). "
                      "Left untouched." % (rel, len(begins), len(ends)))
@@ -319,7 +331,7 @@ def vstr(v):
 
 def release_version(release=RELEASE):
     for line in read(os.path.join(release, "PROTOCOL")).split("\n"):
-        m = re.match(r"\s*protocol\s+v(\d+)\.(\d+)(?:\.(\d+))?\s*$", line)
+        m = re.match(r"\s*protocol\s+v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?\s*$", line)
         if m:
             return tuple(int(x or 0) for x in m.groups())
     raise refuse("release-no-protocol", "init/release/PROTOCOL declares no `protocol vX.Y` line")
@@ -368,7 +380,7 @@ def scan(text):
                 pins.append((i + 1, m.group(2), m.group(3)))
             else:
                 bad.append(i + 1)
-        elif mentions and REF_MENTION.search(l):
+        elif mentions and ref_mention(l):
             m = REF_LINE.fullmatch(l)
             if m:
                 pins.append((i + 1, "gates_ref", m.group(2)))
@@ -442,6 +454,18 @@ def plan(target, sha, today, history, release=RELEASE):
         doc = attempt(load, full, path)
         if doc is None or attempt(parse_region, doc.text, path) is None:
             continue
+        b_, e_ = parse_region(doc.text, path)
+        ms = markers(doc.text)
+        odd = ([n for n, v in ms if v is None] or [n for n, _ in ms if not b_ < n - 1 < e_]
+               or [n for n, _ in ms][1:])
+        if odd:
+            problems.append(str(refuse("marker-shape", (
+                "%s line %s: init expects at most one Protocol version marker, readable, inside "
+                "the region. This file has one it cannot read, one outside the region, or more "
+                "than one, and the check is red on the same thing. Remove or correct that line "
+                "by hand, then run init again. Left untouched.")
+                % (path, ", ".join(map(str, sorted(set(odd))))))))
+            continue
         cur = region_body(doc.text, path)
         have = [v for _, v in markers(cur) if v]
         if have and max(have) > rel_version:
@@ -459,7 +483,7 @@ def plan(target, sha, today, history, release=RELEASE):
 
     # Callers. A repo may carry the one-file shape (both jobs in one workflow), so accepted
     # pins are found wherever they are rather than assumed at tier1.yml.
-    if attempt(guard, target, WF + "/x") is None:
+    if attempt(guard, target, WF, False) is None:
         raise gathered(problems)
     docs, kinds, has_security, reported = {}, set(), False, set()
     for p in workflow_files(target):
@@ -474,33 +498,44 @@ def plan(target, sha, today, history, release=RELEASE):
             problems.append(str(refuse("security-noncanonical", (
                 "%s line %s names the security-checks workflow in a form init does not read. The "
                 "accepted form is %s. Fix or remove the line by hand, then run init again.")
-                % (p, ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))))
+                % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))))
         if bad:
             problems.append(str(refuse("caller-noncanonical", (
                 "%s line %s names the toolkit, or a gates_ref, in a form init does not read. The "
-                "accepted forms are %s. Fix the line by hand, then run init again.")
-                % (p, ", ".join(map(str, bad)), CANONICAL))))
+                "accepted forms are %s. Fix the line by hand, keeping the commit it names (ask the "
+                "founder if it names none), then run init again.")
+                % (show(p), ", ".join(map(str, bad)), CANONICAL))))
             reported.add(p)
             continue
         has_security = has_security or security
         if not pins:
             continue
-        kinds.update(k for _, k, _ in pins)
+        here = [k for _, k, _ in pins]
+        if here.count("gates") != here.count("gates_ref"):
+            problems.append(str(refuse("pin-unpaired", (
+                "%s has %d gates.yml call(s) and %d gates_ref line(s) in init's form; each call "
+                "needs its own. Fix the caller by hand, then run init again.")
+                % (show(p), here.count("gates"), here.count("gates_ref")))))
+            reported.add(p)
+            continue
+        kinds.update(here)
         stuck = sorted({s for _, _, s in pins if not is_ancestor(history, s, sha)})
         if stuck:
             problems.append(str(refuse("pin-not-ancestor", (
                 "%s pins %s, which this checkout's history does not contain (a newer release, or "
                 "one it cannot place). init moves a pin only forward. If the repo is not ahead, "
                 "check that this toolkit clone has its full history.")
-                % (p, ", ".join(s[:12] for s in stuck)))))
+                % (show(p), ", ".join(s[:12] for s in stuck)))))
             continue
         new = move_pins(doc.text, sha, label)
         if new != doc.text:
-            writes.append((p, doc.dump(new), "moved pin"))
-            notes.append("note    %s: only its pin lines changed. Its body is this repo's; compare "
-                         "it with the release's copy if the release changed the caller." % p)
+            moved = {s_ for _, _, s_ in pins} != {sha}
+            writes.append((p, doc.dump(new), "moved pin" if moved else "relabelled pin"))
+            notes.append("note    %s: only its pin lines changed. Its body is this repo's, and any "
+                         "header in it about where a SHA comes from may be stale: the Protocol "
+                         "version paragraph in CLAUDE.md governs." % show(p))
         else:
-            notes.append("same    %s" % p)
+            notes.append("same    %s" % show(p))
     for (path, src), kind in ((TIER1, "gates"), (REVIEWC, "review")):
         if kind in kinds:
             continue
@@ -532,14 +567,28 @@ def plan(target, sha, today, history, release=RELEASE):
 _replace = os.replace  # two seams the selftest uses to make a write fail on purpose
 
 
-def _write_tmp(directory, text):
-    """Write `text` to a new file in `directory` and return its path. mkstemp creates the
-    file exclusively under a random name, so it can never open something already there: no
-    link a repo plants at a guessable name is followed."""
+def _write_tmp(directory, text, mode):
+    """Write `text` to a new file in `directory`, with permission bits `mode`, and return
+    its path. mkstemp creates the file exclusively under a random name, so it can never open
+    something already there: no link a repo plants at a guessable name is followed."""
     fd, path = tempfile.mkstemp(dir=directory, prefix=".gates-init.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-        fh.write(text)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        os.chmod(path, mode)
+    except OSError:
+        os.remove(path)
+        raise
     return path
+
+
+def _mode_for(full):
+    """An existing file keeps its permission bits; a new one gets what the umask allows."""
+    if os.path.isfile(full):
+        return os.stat(full).st_mode & 0o777
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
 
 
 def apply(target, writes):
@@ -557,7 +606,7 @@ def apply(target, writes):
             full = guard(target, path)
             os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
             guard(target, path)  # again, after the directories exist
-            staged.append((path, full, _write_tmp(os.path.dirname(full) or ".", text)))
+            staged.append((path, full, _write_tmp(os.path.dirname(full) or ".", text, _mode_for(full))))
     except (OSError, Problem) as e:
         clean()
         raise refuse("write-prepare-failed", "%s could not be prepared (%s). No standing-orders "
@@ -634,7 +683,7 @@ def cmd_init(target, sha, toolkit=TOOLKIT, today=None):
         print("init: stopped. Unless a line above says a file was already written, nothing was.")
         return 1
     for path, _, verb in writes:
-        print("%-7s %s" % (verb.split()[0], path) + ("" if verb == "wrote" else "  (%s)" % verb))
+        print("%-7s %s" % (verb.split()[0], show(path)) + ("" if verb == "wrote" else "  (%s)" % verb))
     for n in notes:
         print(n)
     print("init: done. Read the diff, run the gates, and open a PR; init never commits or pushes.")
@@ -685,12 +734,14 @@ def check(target, release=RELEASE):
             continue
         if len(ms) > 1:
             red(fails, "duplicate-marker", "%s: expected one Protocol version marker, found %d "
-                "(lines %s); no copy wins. See %s." % (path, len(ms), ", ".join(str(n) for n, _ in ms), ptr))
+                "(lines %s); no copy wins. Remove the extra one by hand; init does not. Then see "
+                "%s." % (path, len(ms), ", ".join(str(n) for n, _ in ms), ptr))
             continue
         n, v = ms[0]
         if v is None:
             red(fails, "unreadable-marker", "%s:%d: expected a marker reading `**Protocol version: "
-                "vibeOS docs/02 %s**`, found one this check cannot read. See %s." % (path, n, vstr(rel), ptr))
+                "vibeOS docs/02 %s**`, found one this check cannot read. Correct or remove that "
+                "line by hand; init does not. Then see %s." % (path, n, vstr(rel), ptr))
             continue
         seen[path] = v
         found = ("%s:%d: expected %s, the version this toolkit checkout declares (in CI, the pinned "
@@ -710,22 +761,25 @@ def check(target, release=RELEASE):
         pins, bad, sec_bad, _ = scan(text)
         if bad:
             red(fails, "caller-noncanonical", "%s line %s: expected the toolkit and a gates_ref "
-                "named only in the forms init writes (%s), found another form. See %s."
-                % (show(p), ", ".join(map(str, bad)), CANONICAL, ptr))
+                "named only in the forms init writes (%s), found another form. Fix the line by "
+                "hand, keeping the commit it names; init does not repair a caller."
+                % (show(p), ", ".join(map(str, bad)), CANONICAL))
         if sec_bad:
             red(fails, "security-noncanonical", "%s line %s: expected the security workflow named "
-                "only in the form init writes (%s), found another form. See %s."
-                % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY, ptr))
+                "only in the form init writes (%s), found another form. Fix or remove the line "
+                "by hand; init does not repair a caller."
+                % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))
         kinds = [k for _, k, _ in pins]
         if kinds.count("gates") != kinds.count("gates_ref"):
             red(fails, "pin-unpaired", "%s: expected one gates_ref for each gates.yml call, found "
-                "%d call(s) and %d gates_ref. See %s."
-                % (show(p), kinds.count("gates"), kinds.count("gates_ref"), ptr))
+                "%d call(s) and %d gates_ref. Fix the caller by hand; init does not repair one."
+                % (show(p), kinds.count("gates"), kinds.count("gates_ref")))
         occ += [(show(p), k, s) for _, k, s in pins]
     lacking = [k for k in ("gates", "gates_ref", "review") if k not in {k for _, k, _ in occ}]
     if lacking:
         red(fails, "pin-missing", "expected a gates.yml call with its gates_ref, and a review.yml "
-            "call, in %s; found no %s pin. See %s." % (WF, " or ".join(lacking), ptr))
+            "call, in %s; found no %s pin. If the repo has no caller at all, see %s; a caller "
+            "that is there and incomplete is fixed by hand." % (WF, " or ".join(lacking), ptr))
     if len({s for _, _, s in occ}) > 1:
         red(fails, "pin-split", "expected every gates pin to name one commit, found %s. "
             "See %s." % ("; ".join("%s %s %s" % (p, k, s[:12]) for p, k, s in occ), ptr))
@@ -913,6 +967,8 @@ def derive_claude(t):
          "`CLAUDE.md` and `AGENTS.md` point there rather than copying it."),
         ("which of this file's product-repo rules", "which of the template's product-repo rules"),
     ])
+    t = _sub(t, "THIS repo's `product/specs/` —",
+             "THIS repo's product/specs/ folder, which starts with the repo's first spec —")
     t = _sub(t, "run `gates init` in this repo's root,",
              "run `python3 <the clone>/init/gates_init.py init . --sha <that SHA>` in this repo's root,")
     t = _sub(t, "vibeOS `docs/03`'s \"Working with the founder\" holds",
@@ -979,7 +1035,7 @@ ZONES = sorted(l.strip() for l in read(os.path.join(HERE, "tznames.txt")).split(
 
 
 def _names_rx(names):
-    return re.compile(r"(?<![\w/+-])(?:%s)(?![\w/+-])"
+    return re.compile(r"(?<![\w/+-])(?:%s)(?![\w/])"
                       % "|".join(re.escape(z) for z in sorted(names, key=len, reverse=True)))
 
 
@@ -1025,7 +1081,7 @@ def citation_version(toolkit=TOOLKIT):
 def protocol_of(vibeos):
     """The version docs/02 declares, which every template marker must equal."""
     text = read(os.path.join(vibeos, "docs", "02-vibecoding-protocol.md"))
-    m = re.search(r"^\*\*Protocol version: v(\d+)\.(\d+)(?:\.(\d+))?\.\*\*", text, re.M)
+    m = re.search(r"^\*\*Protocol version: v([0-9]+)\.([0-9]+)(?:\.([0-9]+))?\.\*\*", text, re.M)
     if not m:
         raise refuse("derive-no-protocol", "derive: docs/02 declares no `**Protocol version: vX.Y.**` line")
     return tuple(int(x or 0) for x in m.groups())
@@ -1251,7 +1307,8 @@ def selftest():
         fh.write(b"\xff\xfe not utf-8")
     ok(refused(d, "unreadable"), "a file that is not UTF-8 text is refused with a message, not a traceback")
     ok("unreadable-file" in {c_ for c_, _ in check(d)}, "and the check is red on it under its own code")
-    for name, brk in (("a lone carriage return", "\r"), ("a Unicode line separator", "\u2028"), ("a next-line character", "\x85")):
+    for name, brk in (("a lone carriage return", "\r"), ("a Unicode line separator", "\u2028"), ("a next-line character", "\x85"),
+                      ("a Unicode paragraph separator", "\u2029"), ("a vertical tab", "\x0b"), ("a form feed", "\x0c")):
         d = fresh("oddbreak")
         init(d)
         t = raw(d, TIER1[0]).replace("gates.yml@%s # %s\n" % (N, label),
@@ -1282,6 +1339,12 @@ def selftest():
          "# A\n- ```sh\n  make\n  ```\n\n```\n" + BEGIN + "\nx\n" + END + "\n```\n"),
         ("a pair after a stray fence line inside an HTML comment", "region-fence-unclear",
          "# A\n<!--\n```\n-->\n```\n" + BEGIN + "\nx\n" + END + "\n```\n"),
+        ("a pair in a fence after an HTML comment holding a fence line, with a later prose line that carries a fence run", "region-fence-unclear",
+         "# A\n<!--\n```\n-->\n```\n" + BEGIN + "\nx\n" + END + "\n```\nTo show code, open with ``` on its own line.\n"),
+        ("a pair in a fence after a list-line fence and a prose line that carries a fence run", "region-fence-unclear",
+         "# A\n- ```sh\n  make\n  ```\nUse ``` to open a fence.\n```\n" + BEGIN + "\nx\n" + END + "\n```\nAnd ``` closes it.\n"),
+        ("a pair below a fence indented four spaces", "region-fence-unclear",
+         "# A\n\n1. x\n\n    ```\n    y\n    ```\n\n" + BEGIN + "\nx\n" + END + "\n"),
         ("a marker after other text on its line", "region-not-col0", "# A\nsee " + BEGIN + " here\n"),
         ("an indented pair", "region-not-col0", "# A\n  " + BEGIN + "\nx\n  " + END + "\n"),
         ("a pair in a code block indented four spaces", "region-not-col0",
@@ -1396,6 +1459,31 @@ def selftest():
     init(d)
     write(d, "CLAUDE.md", raw(d, "CLAUDE.md").replace("docs/02 " + relv, "docs/02 " + ahead, 1))
     ok(refused(d, "marker-ahead"), "a marker ahead of this release is refused, so init never downgrades a region")
+    for name, f in (("a marker init cannot read", lambda t: MARKER.sub("**Protocol version: vibeOS docs/02 v9**", t, count=1)),
+                    ("an unreadable marker claiming a newer version", lambda t: MARKER.sub("**Protocol version: vibeOS `docs/02` v9.0**", t, count=1)),
+                    ("a second marker below the region", lambda t: t + "\n- note: **Protocol version: vibeOS docs/02 %s**\n" % behind),
+                    ("a second marker inside the region", lambda t: t.replace(BEGIN + "\n", BEGIN + "\n**Protocol version: vibeOS docs/02 %s**\n" % relv, 1))):
+        d = fresh("marker-shape")
+        init(d)
+        write(d, "CLAUDE.md", f(raw(d, "CLAUDE.md")))
+        ok(refused(d, "marker-shape") and check(d) != [],
+           "%s is refused by init, never overwritten, and the check is red on the same file" % name)
+    d = fresh("no-marker")
+    init(d)
+    write(d, "AGENTS.md", "\n".join(l for l in raw(d, "AGENTS.md").split("\n") if not MARKER_LOOSE.search(l)))
+    init(d)
+    ok(check(d) == [], "a region that has lost its marker line is repaired by init, and the check is green again")
+    d = fresh("unpaired")
+    init(d)
+    write(d, TIER1[0], "\n".join(l for l in raw(d, TIER1[0]).split("\n") if "gates_ref: " + N not in l))
+    ok(refused(d, "pin-unpaired", at="N1") and {"pin-unpaired", "pin-missing"} <= {c_ for c_, _ in check(d)},
+       "a gates call that has lost its gates_ref is refused by init, which the check is red on too, so 'run init' is never the answer to it")
+    d = fresh("relabel")
+    init(d)
+    write(d, REVIEWC[0], raw(d, REVIEWC[0]).replace(" # " + label, " # mine"))
+    writes, _ = init(d)
+    ok([(w[0], w[2]) for w in writes] == [(REVIEWC[0], "relabelled pin")] and (" # " + label) in raw(d, REVIEWC[0]),
+       "a pin whose SHA is current and whose comment is not gets its label back, and init calls that relabelled, not moved")
     d = fresh("one-file")
     one = ("jobs:\n  gates:\n    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s  # tag=v1.0.0\n"
            "    with:\n      gates_ref: %s # v1.0.0-rc1\n  review:\n"
@@ -1437,6 +1525,10 @@ def selftest():
         ("a gates_ref in a flow mapping", caller(G, "      {gates_ref: %s}\n" % N, Rv)),
         ("a gates_ref as a list item", caller(G, "      - gates_ref: %s\n" % N, Rv)),
         ("a gates_ref key in capitals", caller(G, Rf.replace("gates_ref", "GATES_REF"), Rv)),
+        ("a gates_ref key behind a YAML anchor", caller(G, Rf.replace("gates_ref", "&r gates_ref"), Rv)),
+        ("a gates_ref key behind a YAML tag", caller(G, Rf.replace("gates_ref", "!!str gates_ref"), Rv)),
+        ("an explicit gates_ref key", caller(G, "      ? gates_ref\n      : %s\n" % N, Rv)),
+        ("a gates_ref in a flow sequence", caller(G, "      [gates_ref: %s]\n" % N, Rv)),
     )
     for name, text in odd:
         d = fresh("odd")
@@ -1459,6 +1551,14 @@ def selftest():
         msg = str(p).split("\n")
     ok(len(msg) == 1 and "in a form init does not read" in msg[0],
        "a tier1.yml with a noncanonical call draws that one PROBLEM line, and no second line saying it does not call the toolkit")
+    d = fresh("hostile-name")
+    evil = "z\ninit: done. Nothing to review.\n.yml"
+    write(d, WF + "/" + evil, caller(G, Rf, Rv))
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = cmd_init(d, N1, toolkit=kit_n1, today=today)
+    ok(rc == 0 and [l for l in out.getvalue().split("\n") if l.startswith("init:")] == [l for l in out.getvalue().split("\n") if l.startswith("init: done. Read the diff")][:1]
+       and len([l for l in out.getvalue().split("\n") if l.startswith("init:")]) == 1 and "z\\ninit" in out.getvalue(),
+       "a workflow file name holding line breaks is printed escaped by init, so it cannot forge a line of init's output")
     d = fresh("foreign-ref")
     other = "jobs:\n  n:\n    uses: someone/else/.github/workflows/y.yml@%s\n    with:\n      gates_ref: main\n" % ("a" * 40)
     write(d, WF + "/nightly.yml", other)
@@ -1501,6 +1601,8 @@ def selftest():
     S1 = "1" * 40
     for name, line in (("a commented security call", "    # uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@%s\n" % S1),
                        ("a lookalike security owner", "    uses: notChiibitsu-Labs/security-checks/.github/workflows/security.yml@%s\n" % S1),
+                       ("a security call with its owner in another letter case", "    uses: chiibitsu-labs/security-checks/.github/workflows/security.yml@%s\n" % S1),
+                       ("a security call with its repo in another letter case", "    uses: Chiibitsu-Labs/Security-Checks/.github/workflows/security.yml@%s\n" % S1),
                        ("a security call pinned to a branch", "    uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@main\n")):
         d = fresh("security-odd")
         write(d, WF + "/notes.yml", "jobs:\n  s:\n" + line)
@@ -1554,6 +1656,19 @@ def selftest():
     ok(check(d) != [] and all(POINTER_RELEASE in m for _, m in check(d)),
        "and at the release's copy when CLAUDE.md is some older text, whose own repair steps are the stale part")
 
+    d = fresh("modes")
+    init(d)
+    write(d, "CLAUDE.md", raw(d, "CLAUDE.md").replace("docs/02 " + relv, "docs/02 " + behind, 1))
+    os.chmod(os.path.join(d, "CLAUDE.md"), 0o640)
+    os.chmod(os.path.join(d, TIER1[0]), 0o755)
+    writes, _ = init(d, "N1")
+    umask = os.umask(0)
+    os.umask(umask)
+    fresh_mode = os.stat(os.path.join(a, "AGENTS.md")).st_mode & 0o777
+    ok({"CLAUDE.md", TIER1[0]} <= {w[0] for w in writes} and os.stat(os.path.join(d, "CLAUDE.md")).st_mode & 0o777 == 0o640 and os.stat(os.path.join(d, TIER1[0])).st_mode & 0o777 == 0o755
+       and fresh_mode == 0o666 & ~umask,
+       "a rewritten file keeps its permission bits (0640 and 0755 here), and a new file gets what the umask allows (%o)" % fresh_mode)
+
     # 10. writing: a failure before anything is moved changes nothing; one after says what moved.
     d = fresh("write-prepare")
     real_tmp, real_replace, n_ = _write_tmp, _replace, [0]
@@ -1569,6 +1684,15 @@ def selftest():
     ok(refused(d, "write-prepare-failed") and snapshot(d) == {},
        "a failure while preparing the third file leaves the tree as it was, with no temporary file left behind")
     _write_tmp, n_[0] = real_tmp, 0
+    d = fresh("write-inner")
+    real_chmod = os.chmod
+    os.chmod = third_fails(real_chmod)
+    try:
+        inner = refused(d, "write-prepare-failed") and snapshot(d) == {}
+    finally:
+        os.chmod = real_chmod
+    ok(inner, "a failure inside the writing of the third temporary file itself also leaves no temporary file behind")
+    n_[0] = 0
     d = fresh("write-move")
     _replace = third_fails(real_replace)
     msg = []
@@ -1591,6 +1715,8 @@ def selftest():
             ok(text.count(POINTER_PARAGRAPH) == 1 and POINTER_PARAGRAPH in region_body(text),
                "init/release/%s carries the %s line once, inside its region" % (name, POINTER_WORD))
             ok([v for _, v in markers(text)] == [rel], "init/release/%s carries one marker, at %s" % (name, relv))
+    ok("`product/specs/`" not in read(os.path.join(RELEASE, "claude-md.md")),
+       "the CLAUDE copy does not cite the consuming repo's spec folder as an existing path, so a fresh repo's reference gate has nothing to resolve there")
     ok(label == cite, "the release's tier1 and review callers label every gates pin %s, the version CITATION.cff declares" % cite)
     relbad2 = fresh("release-label")
     for n_ in (TIER1[1], REVIEWC[1]):
@@ -1598,8 +1724,9 @@ def selftest():
     write(relbad2, REVIEWC[1], read(os.path.join(RELEASE, REVIEWC[1])).replace(" # " + label, " # v0.0.1"))
     ok(fires("release-no-label", lambda: release_label(relbad2)), "a review caller labelled differently from tier1 is refused")
     ok(LOCATOR_ALLOW == {"chiibitsu/vibeos", "chiibitsu-labs/gates", "chiibitsu-labs/security-checks"}
-       and USES_ALLOW - LOCATOR_ALLOW == {"actions/checkout", "actions/setup-node"} and ZONE_PASS == {"UTC", "GMT"},
-       "the shape check's three exemption lists are exactly: vibeOS, gates and security-checks; plus two public actions for `uses:`; and the bare words UTC and GMT")
+       and USES_ALLOW - LOCATOR_ALLOW == {"actions/checkout", "actions/setup-node"} and ZONE_PASS == {"UTC", "GMT"}
+       and IN_REPO_FIRST.pattern == r"(?:canon|docs|ops|templates|team|product|patterns|scripts|\.github|\.claude|gates|fixtures|init|src|app|supabase|tests)",
+       "the shape check's four exemption lists are exactly: vibeOS, gates and security-checks; plus two public actions for `uses:`; the bare words UTC and GMT; and seventeen in-repo directory names that may open a backticked path")
     ok(all(VIBEOS_ORIGIN.search(u) for u in ("https://github.com/chiibitsu/vibeOS", "https://github.com/chiibitsu/vibeos.git",
                                              "git@github.com:chiibitsu/vibeOS.git", "ssh://git@github.com/chiibitsu/vibeOS"))
        and not any(VIBEOS_ORIGIN.search(u) for u in ("https://github.com/chiibitsu/vibeOS-fork", "https://github.com/notchiibitsu/vibeOS",
@@ -1629,7 +1756,8 @@ def selftest():
         "    uses: actions/checkout@" + "a" * 40: False,
         "containers run UTC": False, "the ledger, unheaded": False, "2026-11-09": False,
         "v8.2, PR #208": False, "2.18 MB of notification bodies": False, "Japanese": False,
-        "a GBP price": False,
+        "a GBP price": False, "an Asia/Tokyo-based team": True, "Japan-based": True, "Asia/Tokyo+1": True,
+        "`gates/secret:README.md`": False, "`clientco/portal`": True,
     }
     for probe, bad in probes.items():
         ok(bool(leaks(probe)) == bad, "the shape check %s %r" % ("catches" if bad else "passes", probe))
@@ -1701,12 +1829,17 @@ def selftest():
     ok(fires("derive-not-main", lambda: published(clone, anyorigin)), "derive refuses a checkout whose HEAD is not origin/main")
 
     # 13. the command line.
-    with contextlib.redirect_stdout(io.StringIO()) as out:
-        rcs = [main(["x", "init", "--sha", N]), main(["x", "init", "-t", "--sha", N]),
-               main(["x", "check", a, "--live-standing-orders"]), main(["x", "init", a, "--adopt", "--sha", N]),
-               main(["x", "nope", a]), main(["x", "init", "", "--sha", N])]
+    empty_cwd, was = fresh("cwd"), os.getcwd()
+    os.chdir(empty_cwd)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            rcs = [main(["x", "init", "--sha", N]), main(["x", "init", "-t", "--sha", N]),
+                   main(["x", "check", a, "--live-standing-orders"]), main(["x", "init", a, "--adopt", "--sha", N]),
+                   main(["x", "nope", a]), main(["x", "init", "", "--sha", N])]
+    finally:
+        os.chdir(was)
     ok(rcs == [2] * 6 and out.getvalue().count("gates_init.py init   TARGET --sha SHA") == 6
-       and not os.path.exists("--sha") and not os.path.exists("-t") and not os.path.exists("CLAUDE.md"),
+       and os.listdir(empty_cwd) == [],
        "a flag where TARGET belongs, an unknown flag, an unknown command and an empty TARGET each exit 2, print the usage, and create nothing")
     with contextlib.redirect_stdout(io.StringIO()) as out:
         rc_ok, rc_red = cmd_check(a), cmd_check(fresh("empty-check"))

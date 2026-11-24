@@ -9,7 +9,7 @@
 
 ## What this is
 One paragraph: the product, the user, the current phase. Link the live PRD(s) in
-THIS repo's `product/specs/` — specs live with the code they specify; the vibeOS repo (canon +
+THIS repo's product/specs/ folder, which starts with the repo's first spec — specs live with the code they specify; the vibeOS repo (canon +
 protocols) is attached alongside in every build session.
 
 **Active scope** (vibeOS docs/06 registry): `<scope-id>` — the memory loop's readback

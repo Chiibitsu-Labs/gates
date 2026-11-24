@@ -174,9 +174,13 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   on its line at column 0. init rewrites the region and keeps every byte outside it, in the
   file's own line ending. Any line that carries the marker text in another way (indented,
   with other text, with trailing spaces) is refused, and so is a file with no region, more
-  than one marker of either kind, the end before the begin, a marker in a fenced block, code
-  fences that do not pair up around a marker, mixed line endings, a line break that is
-  neither LF nor CRLF, or bytes that are not UTF-8.
+  than one marker of either kind, the end before the begin, a marker in a fenced block,
+  mixed line endings, a line break that is neither LF nor CRLF, or bytes that are not UTF-8.
+  A fence run above the begin marker that is not a plain fence line (after a list marker, in
+  prose, indented four or more, or inside an HTML comment) is refused too: a Markdown
+  renderer may read it differently, and init does not guess. The same goes for the Protocol
+  version line: at most one, readable, inside the region. One it cannot read, a second one,
+  or one outside the region is refused, and a rewritten file keeps its permission bits.
 - **A file with no region is not adopted, and a repo that reads the standing orders live is
   not handled.** Both are refused with a message. Adoption and the live-read case are a
   later slice's (the founder's ruling on this pull request; vibeOS repo-bootstrap spec, open
@@ -187,12 +191,14 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   accepts exactly `uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<40-hex SHA>`
   (or `review.yml`) and `gates_ref: <40-hex SHA>`, each alone on its line, unquoted, with
   any trailing comment. A quoted or spaced key, a flow mapping, a tag or branch pin, another
-  letter case, a lookalike owner or a commented-out call is detected, not accepted, and
-  stops the run: fix the line by hand first. The security caller is read the same way.
+  letter case, a lookalike owner, a commented-out call, or a `gates_ref` key behind an
+  anchor or a tag is detected, not accepted, and stops the run: fix the line by hand first,
+  keeping the commit it names. A gates call without its own `gates_ref` stops the run too.
+  The security caller is read the same way.
 - **When a pin moves:** to the SHA of the checkout init runs from, and only forward. An
   accepted pin moves only if that checkout's history contains it; a newer or unknown pin, or
-  a marker ahead of this release, stops the run. Each moved line gets this release's version
-  label in place of whatever comment it had.
+  a marker ahead of this release, stops the run. Each pin line gets this release's version
+  label in place of whatever comment it had ("relabelled" when the SHA was already current).
 - **Callers that already exist:** only their pin lines change; their bodies are the repo's
   (the `project:` job is meant to be edited). A one-file caller in this repo's
   `caller-template.yml` shape is found and moved; no second caller is added beside it. A
@@ -206,7 +212,8 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   it had already moved, never "nothing was written". TARGET must be an existing directory.
 
 **The check** runs in `gates.yml` after the gates: its `--selftest` first, then `check` on
-your tree. It is red, with expected, found and the paragraph to read, for a missing or
+your tree. It is red, with expected, found and either the paragraph to read or the words
+"fix by hand" where init cannot repair it, for a missing or
 unreadable file among the three, a line break that is neither LF nor CRLF, a missing,
 unreadable or duplicated marker (two on one line count as two), a marker behind
 or ahead of the release, the three files split between versions, a toolkit or security line
@@ -235,10 +242,13 @@ not the name). The copy leaves out the time-ledger section, the vault-memory got
 founder's timezone and name, and the deploy-after-merge section. It rewrites vibeOS paths as
 `chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
 resolve; it names the real `init` command where vibeOS's template says "gates init"; it
+names the consuming repo's spec folder without citing it as a path that already exists; it
 tells a session that the callers' SHAs are already set; and it adds a pointer line to each
 file's region, which sends a session that can read vibeOS to that repo's rules and keeps
 the `init` steps as this copy's own. `gates_init.py` lists exactly which shapes the checks
-match: `owner/repo` locators in five positions against an allowlist, every time zone name
+match: `owner/repo` locators in five positions against an allowlist (a backticked or
+`x/y:` path whose first segment is one of seventeen in-repo directory names is taken as a
+path, not a locator), every time zone name
 in `init/tznames.txt` (vendored public data) except the bare words UTC and GMT, UTC offsets,
 the name, the ledger heading and the vault lead. They do not catch an unbackticked
 `acme/widget` in prose, a zone name or abbreviation the vendored list does not hold, or any
