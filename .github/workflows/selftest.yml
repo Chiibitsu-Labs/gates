@@ -31,8 +31,9 @@ jobs:
           lfs: true
       - name: Prove every gate can fail, then run it on this tree
         run: ./selftest.sh .
-      # gates init and the standing-orders check prove themselves here. This workflow does not
-      # run the check over this tree. caller-smoke.yml will, once its pin reaches a release that
-      # carries the check, and the README's release checklist says that bump waits on the founder.
+      # gates init and the standing-orders check prove themselves here. Nothing runs the check
+      # over this tree: this repo is exempt (the founder's ruling, 2026-11-24), and gates.yml
+      # says so on every run once caller-smoke.yml's pin reaches a release that carries the
+      # exemption. The README's release checklist, step 5, says which releases that pin may take.
       - name: gates init and the standing-orders check prove every case
         run: python3 -I init/gates_init.py --selftest
