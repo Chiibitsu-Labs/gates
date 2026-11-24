@@ -16,7 +16,8 @@ toolkit has its gates pin lines moved, and nothing else in it. init never touche
 ONE RULE FOR EVERY MATCH: DETECT WIDE, ACCEPT NARROW, REFUSE THE REST. A line is DETECTED by
 a loose test (a region marker's text anywhere on it; the toolkit's workflow path anywhere on
 it) and ACCEPTED only in the one exact form init itself writes. Detected and not accepted is
-refused by init and red in the check, so no spelling has to be recognised to be safe.
+refused by init and red in the check, so a spelling init can see is never guessed at. Two
+shapes it cannot see by reading lines are named in the README's Known gaps.
 
 STANDING-ORDERS FILES. Each holds one template-owned region between the two marker lines
 below, each alone on its line at column 0. init rewrites the region and keeps every byte
@@ -25,17 +26,20 @@ one marker of either kind, the end before the begin, a marker inside a fenced bl
 marker text anywhere else on a line. A file with no region is NOT adopted by this release,
 and a repo that reads the standing orders live is not handled: both are a later slice's.
 
-WHEN A PIN MOVES. To the SHA of the checkout init runs from, and only forward: an existing
-pin moves only if that checkout's history contains it. Anything else stops the whole run.
+WHEN A PIN MOVES. To the SHA of the checkout init runs from, which must be a full clone at
+a tagged release, and only forward: an existing pin moves only if that checkout's history
+contains it. Anything else stops the whole run.
 
 ALL OR NOTHING. Every file is planned first and any problem stops the run before a write.
-Writes go to temporary files first and are then moved into place.
+Writes go to new, randomly named temporary files first and are then moved into place.
 
 THE CHECK asserts the markers and the pins, never the body. It reads the expected version
 from its own checkout's PROTOCOL: in CI that checkout is the pinned release. It edits nothing.
 
 EVERY REFUSAL AND EVERY RED IS NAMED in REFUSALS and REDS below, and `--selftest` fails
-unless each one fired during the run and the two lists match the code, by name, both ways.
+unless each one fired at least once during the run and the two lists match the code, by
+name, both ways. That proves each one can happen; it does not prove every condition inside
+every guard, which the selftest's cases cover only as far as each ok-line says.
 """
 import contextlib
 import datetime
@@ -93,10 +97,12 @@ POINTER_RELEASE = ("the Protocol version paragraph of init/release/claude-md.md 
                    "Chiibitsu-Labs/gates at the SHA this repo pins")
 
 REFUSALS = (
-    "sha-shape", "sha-not-head", "toolkit-unclean", "target-not-dir",
+    "sha-shape", "sha-not-head", "sha-not-release", "toolkit-shallow", "toolkit-unclean",
+    "target-not-dir",
     "symlink", "not-a-directory", "not-a-file", "hard-link", "unreadable", "mixed-eol",
+    "odd-line-break",
     "region-none", "region-many", "region-unpaired", "region-reversed", "region-fenced",
-    "region-not-col0", "marker-ahead",
+    "region-fence-unclear", "region-not-col0", "marker-ahead",
     "caller-noncanonical", "pin-not-ancestor", "caller-unrelated", "security-noncanonical",
     "write-prepare-failed", "write-failed", "release-no-protocol", "release-no-label",
     "derive-edit-count", "derive-paragraph", "derive-bare-path", "derive-no-marker",
@@ -104,7 +110,7 @@ REFUSALS = (
     "derive-no-citation", "derive-unclean", "derive-origin", "derive-no-main", "derive-not-main",
 )
 REDS = (
-    "missing-file", "unreadable-file", "missing-marker", "unreadable-marker",
+    "missing-file", "unreadable-file", "odd-line-break", "missing-marker", "unreadable-marker",
     "duplicate-marker", "behind", "ahead", "split",
     "caller-noncanonical", "security-noncanonical", "pin-missing", "pin-unpaired", "pin-split",
 )
@@ -147,6 +153,17 @@ class Doc:
         return self.bom + (text.replace("\n", "\r\n") if self.eol == "\r\n" else text)
 
 
+# Line breaks other than LF and CRLF. A YAML or Markdown reader may split a line on one of
+# these where this script, reading by LF, would not, so a file that carries one is refused
+# by init and red in the check rather than read two ways.
+ODD_BREAK = re.compile("\r(?!\n)|[\x0b\x0c\x85\u2028\u2029]")
+
+
+def show(name):
+    """A path as it is safe to print: a file name is the repo's to choose, a log line is not."""
+    return name.encode("unicode_escape").decode("ascii")
+
+
 def load(path, rel):
     try:
         with open(path, encoding="utf-8", newline="") as fh:
@@ -156,20 +173,27 @@ def load(path, rel):
                      % (rel, e.__class__.__name__))
     bom = "\ufeff" if raw.startswith("\ufeff") else ""
     raw = raw[len(bom):]
+    if ODD_BREAK.search(raw):
+        raise refuse("odd-line-break", "%s carries a line break that is neither LF nor CRLF (a "
+                     "lone carriage return, or a Unicode line separator), which another reader "
+                     "may split differently. Left untouched." % rel)
     crlf, lf = raw.count("\r\n"), raw.count("\n")
     if "\r" not in raw:
         return Doc(raw, "\n", bom)
-    if crlf == lf and raw.count("\r") == crlf:
+    if crlf == lf:
         return Doc(raw.replace("\r\n", "\n"), "\r\n", bom)
     raise refuse("mixed-eol", "%s mixes line endings (%d CRLF, %d LF-only); give it one, then "
                  "run init again. Left untouched." % (rel, crlf, lf - crlf))
 
 
-def read(path):
-    """Loose read for the check and for release files: never refuses on line endings."""
+def read_raw(path):
     with open(path, encoding="utf-8", newline="") as fh:
-        raw = fh.read()
-    return raw.lstrip("\ufeff").replace("\r\n", "\n")
+        return fh.read()
+
+
+def read(path):
+    """Loose read, for release files and the selftest: a byte-order mark dropped, CRLF folded."""
+    return read_raw(path).lstrip("\ufeff").replace("\r\n", "\n")
 
 
 def guard(target, rel):
@@ -196,6 +220,7 @@ def guard(target, rel):
 # ── regions ────────────────────────────────────────────────────────────────────────────
 
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE_ANYWHERE = re.compile(r"`{3,}|~{3,}")
 
 
 def fence_map(lines):
@@ -223,10 +248,20 @@ def parse_region(text, rel="the file"):
     the shape. `text` is LF text. Detect wide: MARKER_KEY anywhere on a line. Accept narrow:
     the line is exactly BEGIN or END, at column 0, outside any fence."""
     lines = text.split("\n")
-    begins, ends = [], []
+    begins, ends, fences_above = [], [], 0
+    fences_total = sum(1 for l in lines if FENCE_ANYWHERE.search(l))
     for i, (line, fenced) in enumerate(zip(lines, fence_map(lines))):
         if MARKER_KEY not in line:
+            fences_above += bool(FENCE_ANYWHERE.search(line))
             continue
+        if line in (BEGIN, END) and not fenced and (fences_above % 2 or fences_total % 2):
+            # fence_map reads fences the plain way; a fence opened on a list line or inside an
+            # HTML comment is read differently by a Markdown renderer. An odd number of lines
+            # carrying a fence run, above a marker or in the whole file, means the two
+            # readings may disagree about that marker.
+            raise refuse("region-fence-unclear", "%s: its code fences do not pair up (around "
+                         "line %d), so init cannot tell whether that marker is inside one. Left "
+                         "untouched." % (rel, i + 1))
         if line not in (BEGIN, END):
             raise refuse("region-not-col0", "%s: line %d carries region marker text but is not "
                          "exactly one marker, alone, at column 0. Left untouched." % (rel, i + 1))
@@ -268,11 +303,12 @@ def date_marker(text, today):
 
 
 def markers(text):
-    """Every marker-shaped line, as (line_no, version tuple or None for an unreadable one)."""
+    """Every marker-shaped occurrence, two on one line included, as (line_no, version tuple
+    or None for an unreadable one)."""
     out = []
     for i, line in enumerate(text.split("\n")):
-        if MARKER_LOOSE.search(line):
-            m = MARKER.search(line)
+        for hit in MARKER_LOOSE.finditer(line):
+            m = MARKER.match(line, hit.start())
             out.append((i + 1, tuple(int(x or 0) for x in m.groups()) if m else None))
     return out
 
@@ -292,15 +328,16 @@ def release_version(release=RELEASE):
 def release_label(release=RELEASE):
     """The one version label this release's callers carry beside their pins."""
     labels = set()
-    for line in read(os.path.join(release, TIER1[1])).split("\n"):
-        for rx, g in ((USES_LINE, 4), (REF_LINE, 3)):
-            m = rx.fullmatch(line)
-            if m:
-                lm = LABEL.fullmatch(m.group(g))
-                labels.add(lm.group(1) if lm else None)
+    for name in (TIER1[1], REVIEWC[1]):
+        for line in read(os.path.join(release, name)).split("\n"):
+            for rx, g in ((USES_LINE, 4), (REF_LINE, 3)):
+                m = rx.fullmatch(line)
+                if m:
+                    lm = LABEL.fullmatch(m.group(g))
+                    labels.add(lm.group(1) if lm else None)
     if len(labels) != 1 or None in labels:
-        raise refuse("release-no-label", "init/release/%s does not carry one version label "
-                     "beside its pins" % TIER1[1])
+        raise refuse("release-no-label", "init/release/%s and %s do not carry one and the same "
+                     "version label beside every gates pin" % (TIER1[1], REVIEWC[1]))
     return labels.pop()
 
 
@@ -424,7 +461,7 @@ def plan(target, sha, today, history, release=RELEASE):
     # pins are found wherever they are rather than assumed at tier1.yml.
     if attempt(guard, target, WF + "/x") is None:
         raise gathered(problems)
-    docs, kinds, has_security = {}, set(), False
+    docs, kinds, has_security, reported = {}, set(), False, set()
     for p in workflow_files(target):
         if attempt(guard, target, p) is None:
             continue
@@ -443,6 +480,7 @@ def plan(target, sha, today, history, release=RELEASE):
                 "%s line %s names the toolkit, or a gates_ref, in a form init does not read. The "
                 "accepted forms are %s. Fix the line by hand, then run init again.")
                 % (p, ", ".join(map(str, bad)), CANONICAL))))
+            reported.add(p)
             continue
         has_security = has_security or security
         if not pins:
@@ -452,7 +490,8 @@ def plan(target, sha, today, history, release=RELEASE):
         if stuck:
             problems.append(str(refuse("pin-not-ancestor", (
                 "%s pins %s, which this checkout's history does not contain (a newer release, or "
-                "one it cannot place). init moves a pin only forward.")
+                "one it cannot place). init moves a pin only forward. If the repo is not ahead, "
+                "check that this toolkit clone has its full history.")
                 % (p, ", ".join(s[:12] for s in stuck)))))
             continue
         new = move_pins(doc.text, sha, label)
@@ -464,6 +503,8 @@ def plan(target, sha, today, history, release=RELEASE):
             notes.append("same    %s" % p)
     for (path, src), kind in ((TIER1, "gates"), (REVIEWC, "review")):
         if kind in kinds:
+            continue
+        if path in reported:
             continue
         if path in docs:
             problems.append(str(refuse("caller-unrelated", (
@@ -488,13 +529,17 @@ def plan(target, sha, today, history, release=RELEASE):
     return writes, notes
 
 
-TMP = ".gates-init.tmp"
 _replace = os.replace  # two seams the selftest uses to make a write fail on purpose
 
 
-def _write_tmp(path, text):
-    with open(path, "w", encoding="utf-8", newline="") as fh:
+def _write_tmp(directory, text):
+    """Write `text` to a new file in `directory` and return its path. mkstemp creates the
+    file exclusively under a random name, so it can never open something already there: no
+    link a repo plants at a guessable name is followed."""
+    fd, path = tempfile.mkstemp(dir=directory, prefix=".gates-init.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
+    return path
 
 
 def apply(target, writes):
@@ -504,24 +549,23 @@ def apply(target, writes):
     staged, path = [], None
 
     def clean():
-        for _, full in staged:
-            if os.path.exists(full + TMP):
-                os.remove(full + TMP)
+        for _, _, tmp in staged:
+            if os.path.lexists(tmp):
+                os.remove(tmp)
     try:
         for path, text, _ in writes:
             full = guard(target, path)
             os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
             guard(target, path)  # again, after the directories exist
-            staged.append((path, full))
-            _write_tmp(full + TMP, text)
+            staged.append((path, full, _write_tmp(os.path.dirname(full) or ".", text)))
     except (OSError, Problem) as e:
         clean()
         raise refuse("write-prepare-failed", "%s could not be prepared (%s). No standing-orders "
                      "file or caller was changed." % (path, e))
     done = []
-    for path, full in staged:
+    for path, full, tmp in staged:
         try:
-            _replace(full + TMP, full)
+            _replace(tmp, full)
         except OSError as e:
             clean()
             raise refuse("write-failed", "%s could not be written (%s). Already written in this "
@@ -564,6 +608,14 @@ def run_init(target, sha, toolkit=TOOLKIT, release=RELEASE, today=None):
     if why:
         raise refuse("toolkit-unclean", "this toolkit checkout cannot be used: %s. Run init only "
                      "from a clean checkout of the SHA you named." % why)
+    if git(toolkit, "rev-parse", "--is-shallow-repository")[1] != "false":
+        raise refuse("toolkit-shallow", "this toolkit checkout is a shallow clone, so init cannot "
+                     "tell an older pin from an unknown one. Clone with full history.")
+    label = release_label(release)
+    if label not in git(toolkit, "tag", "--points-at", "HEAD")[1].split("\n"):
+        raise refuse("sha-not-release", "this toolkit checkout's HEAD does not carry the tag %s, "
+                     "the release its callers are labelled with. init runs only from a tagged "
+                     "release, so the label it writes beside a pin is true." % label)
     if not os.path.isdir(target):
         raise refuse("target-not-dir", "TARGET %s is not an existing directory; init never "
                      "creates the repo it writes into." % target)
@@ -573,9 +625,9 @@ def run_init(target, sha, toolkit=TOOLKIT, release=RELEASE, today=None):
     return writes, notes
 
 
-def cmd_init(target, sha):
+def cmd_init(target, sha, toolkit=TOOLKIT, today=None):
     try:
-        writes, notes = run_init(target, sha)
+        writes, notes = run_init(target, sha, toolkit=toolkit, today=today)
     except Problem as p:
         for line in str(p).split("\n"):
             print("PROBLEM " + line)
@@ -598,11 +650,17 @@ def check(target, release=RELEASE):
 
     def text_of(path):
         try:
-            return read(os.path.join(target, path))
+            raw = read_raw(os.path.join(target, path))
         except (OSError, UnicodeDecodeError) as e:
             red(fails, "unreadable-file", "%s: expected UTF-8 text, found a file this check cannot "
-                "read (%s)." % (path, e.__class__.__name__))
+                "read (%s). See %s." % (show(path), e.__class__.__name__, ptr))
             return None
+        if ODD_BREAK.search(raw):
+            red(fails, "odd-line-break", "%s: expected only LF or CRLF line breaks, found a lone "
+                "carriage return or a Unicode line separator, which another reader may split "
+                "differently. See %s." % (show(path), ptr))
+            return None
+        return raw.lstrip("\ufeff").replace("\r\n", "\n")
 
     # Point at the repo's own paragraph only when it is the copy's (it names this script); a
     # stale file's own repair text is the stale part.
@@ -653,17 +711,17 @@ def check(target, release=RELEASE):
         if bad:
             red(fails, "caller-noncanonical", "%s line %s: expected the toolkit and a gates_ref "
                 "named only in the forms init writes (%s), found another form. See %s."
-                % (p, ", ".join(map(str, bad)), CANONICAL, ptr))
+                % (show(p), ", ".join(map(str, bad)), CANONICAL, ptr))
         if sec_bad:
             red(fails, "security-noncanonical", "%s line %s: expected the security workflow named "
                 "only in the form init writes (%s), found another form. See %s."
-                % (p, ", ".join(map(str, sec_bad)), CANONICAL_SECURITY, ptr))
+                % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY, ptr))
         kinds = [k for _, k, _ in pins]
         if kinds.count("gates") != kinds.count("gates_ref"):
             red(fails, "pin-unpaired", "%s: expected one gates_ref for each gates.yml call, found "
                 "%d call(s) and %d gates_ref. See %s."
-                % (p, kinds.count("gates"), kinds.count("gates_ref"), ptr))
-        occ += [(p, k, s) for _, k, s in pins]
+                % (show(p), kinds.count("gates"), kinds.count("gates_ref"), ptr))
+        occ += [(show(p), k, s) for _, k, s in pins]
     lacking = [k for k in ("gates", "gates_ref", "review") if k not in {k for _, k, _ in occ}]
     if lacking:
         red(fails, "pin-missing", "expected a gates.yml call with its gates_ref, and a review.yml "
@@ -724,8 +782,10 @@ NOT_YET_LIVE = ("this release's `init` and its check do not handle such a repo y
                 "slice does); until then its repair is the founder's to direct, never a copy by "
                 "hand from vibeOS, whose bare paths a reference gate reads as this repo's own")
 CALLER_NOTE = ("# Written by `gates init`: the toolkit SHAs in this file are already set to the release\n"
-               "# init ran from, so the header's step about replacing them is done. Do not redo it by\n"
-               "# hand, and move them later only by running init from a newer release.\n")
+               "# init ran from. Wherever the header below says to replace or bump them by hand, or to\n"
+               "# take a SHA from the toolkit's Releases table, THIS NOTE SUPERSEDES IT: they move only\n"
+               "# by running init from a newer release, at a SHA from one of the two sources the\n"
+               "# Protocol version paragraph in CLAUDE.md names, and from nowhere else.\n")
 
 NAME_DIGEST = "821e63c5081b93f995d20ab9f57f38eaf8eee8dc61bf5a9d6aef92c224a06485"
 IN_REPO_DIRS = "canon|docs|ops|templates|team|product|patterns|scripts"
@@ -1081,18 +1141,21 @@ def selftest():
         return run(["git", "rev-parse", "HEAD"], d)
 
     # Two stand-in toolkit checkouts with one history: `kit_n` at release N, `kit_n1` at N+1.
-    kit_n = os.path.join(work, "toolkit-N")
-    os.makedirs(kit_n)
-    run(["git", "init", "-q"], kit_n)
-    N = commit(kit_n, "release N")
-    kit_n1 = os.path.join(work, "toolkit-N1")
-    run(["git", "clone", "-q", kit_n, kit_n1], work)
-    N1 = commit(kit_n1, "release N+1")
-    KITS = {"N": (kit_n, N), "N1": (kit_n1, N1)}
     today = "2026-01-02"
     rel = release_version()
     relv = vstr(rel)
     label = release_label()
+    kit_n1 = os.path.join(work, "toolkit-N1")
+    os.makedirs(kit_n1)
+    run(["git", "init", "-q"], kit_n1)
+    N = commit(kit_n1, "release N")
+    N1 = commit(kit_n1, "release N+1")
+    run(["git", "tag", label], kit_n1)                      # N+1 is the tagged release there
+    kit_n = os.path.join(work, "toolkit-N")                 # the same history, checked out at
+    run(["git", "clone", "-q", kit_n1, kit_n], work)        # release N, with N+1 present in it
+    run(["git", "checkout", "-q", N], kit_n)
+    run(["git", "tag", "-f", label], kit_n)
+    KITS = {"N": (kit_n, N), "N1": (kit_n1, N1)}
     behind = "v%d.%d" % (rel[0], rel[1] - 1) if rel[1] else "v%d.9" % (rel[0] - 1)
     ahead = "v%d.%d" % (rel[0], rel[1] + 1)
     count = [0]
@@ -1139,9 +1202,10 @@ def selftest():
        "each standing-orders marker carries the instantiation date")
     ok(pins_of(a) == [("review", N), ("gates", N), ("gates_ref", N)],
        "the three gates-SHA occurrences equal each other and the HEAD of the checkout init ran from")
-    zero = lambda t: move_pins(t, "0" * 40, label)
-    ok(all(zero(got[p]) == zero(read(os.path.join(RELEASE, s))) for p, s in (TIER1, REVIEWC)),
-       "the two gates callers equal the release copies except the three SHAs")
+    rel_sha = SHA40.search(USES_LINE.search(read(os.path.join(RELEASE, TIER1[1]))).group(0)).group(0)
+    ok(all(got[p] == read(os.path.join(RELEASE, s)).replace(rel_sha, N) and rel_sha in read(os.path.join(RELEASE, s))
+           for p, s in (TIER1, REVIEWC)),
+       "the two gates callers equal the release copies byte for byte once the release's SHA is replaced by the running one")
     ok(got[SECURITY[0]] == read(os.path.join(RELEASE, SECURITY[1])), "the security caller equals the release copy")
     ok(check(a) == [], "the check is green on a freshly initialised tree")
 
@@ -1187,6 +1251,19 @@ def selftest():
         fh.write(b"\xff\xfe not utf-8")
     ok(refused(d, "unreadable"), "a file that is not UTF-8 text is refused with a message, not a traceback")
     ok("unreadable-file" in {c_ for c_, _ in check(d)}, "and the check is red on it under its own code")
+    for name, brk in (("a lone carriage return", "\r"), ("a Unicode line separator", "\u2028"), ("a next-line character", "\x85")):
+        d = fresh("oddbreak")
+        init(d)
+        t = raw(d, TIER1[0]).replace("gates.yml@%s # %s\n" % (N, label),
+                                     "gates.yml@%s # %s%s    with:%s      gates_ref: main\n" % (N, label, brk, brk), 1)
+        write(d, TIER1[0], t)
+        ok(t != raw(a, TIER1[0]) and refused(d, "odd-line-break") and {c_ for c_, _ in check(d)} == {"odd-line-break", "pin-missing"},
+           "%s in a caller, hiding a second gates_ref from a line reader, is refused by init and red in the check" % name)
+        d = fresh("oddbreak-md")
+        init(d)
+        write(d, "CLAUDE.md", raw(d, "CLAUDE.md").replace("\n\n", brk + "**Protocol version: vibeOS docs/02 v7.0** twin\n\n", 1))
+        ok(refused(d, "odd-line-break") and "odd-line-break" in {c_ for c_, _ in check(d)},
+           "%s in CLAUDE.md, hiding a second marker, is refused by init and red in the check" % name)
 
     # 4. each malformed region shape is refused under its own name, and nothing is written.
     good = read(os.path.join(RELEASE, "agents-md.md"))
@@ -1201,6 +1278,10 @@ def selftest():
         ("a pair in a four-backtick fence holding a three-backtick one", "region-fenced",
          "# A\n````md\n```\n" + BEGIN + "\nx\n" + END + "\n```\n````\n"),
         ("a pair in a tilde fence", "region-fenced", "# A\n~~~\n" + BEGIN + "\nx\n" + END + "\n~~~\n"),
+        ("a pair in a fence that follows one opened on a list line", "region-fence-unclear",
+         "# A\n- ```sh\n  make\n  ```\n\n```\n" + BEGIN + "\nx\n" + END + "\n```\n"),
+        ("a pair after a stray fence line inside an HTML comment", "region-fence-unclear",
+         "# A\n<!--\n```\n-->\n```\n" + BEGIN + "\nx\n" + END + "\n```\n"),
         ("a marker after other text on its line", "region-not-col0", "# A\nsee " + BEGIN + " here\n"),
         ("an indented pair", "region-not-col0", "# A\n  " + BEGIN + "\nx\n  " + END + "\n"),
         ("a pair in a code block indented four spaces", "region-not-col0",
@@ -1227,6 +1308,27 @@ def selftest():
     ok(refused(d, "hard-link") and raw(outside, "notes.md") == "# notes\n",
        "a hard-linked CLAUDE.md is refused, and the file sharing its inode is untouched")
     os.remove(os.path.join(outside, "notes.md"))
+    for kind in ("a symlink", "a hard link", "a file"):
+        d = fresh("tmp-name")
+        write(outside, "victim.txt", "precious\n")
+        for f in all_files:
+            os.makedirs(os.path.dirname(os.path.join(d, f)), exist_ok=True)
+            for planted in (f + ".gates-init.tmp", os.path.join(os.path.dirname(f), ".gates-init.tmp")):
+                if os.path.lexists(os.path.join(d, planted)):
+                    continue
+                if kind == "a symlink":
+                    os.symlink(os.path.join(outside, "victim.txt"), os.path.join(d, planted))
+                elif kind == "a hard link":
+                    os.link(os.path.join(outside, "victim.txt"), os.path.join(d, planted))
+                elif kind == "a file":
+                    write(d, planted, "the repo's own\n")
+        before = {k: v for k, v in snapshot(d).items()}
+        init(d)
+        after = snapshot(d)
+        ok(raw(outside, "victim.txt") == "precious\n" and all(after[k] == v for k, v in before.items())
+           and sorted(set(after) - set(before)) == sorted(all_files) and check(d) == [],
+           "%s planted at a temporary-looking name beside each destination is neither followed, overwritten nor removed, and the six files are written" % kind)
+        os.remove(os.path.join(outside, "victim.txt"))
     d = fresh("dir-dest")
     os.makedirs(os.path.join(d, TIER1[0]))
     ok(refused(d, "not-a-file"), "a directory where tier1.yml belongs is refused before any write")
@@ -1244,10 +1346,25 @@ def selftest():
         ok(fires(site, lambda: run_init(d, bad_sha, toolkit=kit_n, today=today)) and os.listdir(d) == [],
            "--sha given %s is refused as %s, with nothing written" % (why, site))
     dirty = os.path.join(work, "toolkit-dirty")
-    run(["git", "clone", "-q", kit_n, dirty], work)
+    run(["git", "clone", "-q", kit_n1, dirty], work)
+    run(["git", "checkout", "-q", N], dirty)
     write(dirty, "planted.py", "x\n")
     ok(fires("toolkit-unclean", lambda: run_init(d, N, toolkit=dirty, today=today)) and os.listdir(d) == [],
        "a toolkit checkout with an untracked file is refused, with nothing written")
+    untagged = os.path.join(work, "toolkit-untagged")
+    run(["git", "clone", "-q", kit_n1, untagged], work)
+    U = commit(untagged, "after the release")
+    ok(fires("sha-not-release", lambda: run_init(d, U, toolkit=untagged, today=today)) and os.listdir(d) == [],
+       "a checkout whose HEAD is not the tagged release its callers are labelled with is refused, with nothing written")
+    shallow = os.path.join(work, "toolkit-shallow")
+    run(["git", "clone", "-q", "--depth", "1", "file://" + kit_n1, shallow], work)
+    ok(fires("toolkit-shallow", lambda: run_init(d, N1, toolkit=shallow, today=today)) and os.listdir(d) == [],
+       "a shallow toolkit clone is refused, with nothing written")
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        rc_bad, rc_good = cmd_init(d, N1, toolkit=kit_n, today=today), cmd_init(d, N, toolkit=kit_n, today=today)
+    ok(rc_bad == 1 and "PROBLEM" in out.getvalue() and rc_good == 0 and out.getvalue().count("init: done") == 1
+       and sorted(snapshot(d)) == sorted(all_files),
+       "the `init` command exits 1 with a PROBLEM line on a refusal and 0 after writing the six files")
     run(["git", "add", "planted.py"], dirty)
     run(["git"] + env + ["commit", "-q", "-m", "tracked"], dirty)
     ok(unclean(dirty) is None, "a checkout with nothing changed is clean")
@@ -1268,7 +1385,9 @@ def selftest():
     ok(pins_of(d) == [("review", N1), ("gates", N1), ("gates_ref", N1)],
        "run from release N+1 on a repo pinned to N, init moves all three pins")
     ok(refused(d, "pin-not-ancestor", at="N"),
-       "run from release N on a repo pinned to N+1, init moves no pin and writes nothing")
+       "run from release N on a repo pinned to N+1, in a full clone that holds both commits, init moves no pin and writes nothing")
+    ok(subprocess.run(["git", "-C", kit_n, "cat-file", "-e", N1 + "^{commit}"]).returncode == 0,
+       "(that clone does hold the newer commit, so it is the ancestry test that refused, not a missing object)")
     d = fresh("pin-unknown")
     init(d)
     write(d, TIER1[0], raw(d, TIER1[0]).replace(N, "2" * 40))
@@ -1312,6 +1431,12 @@ def selftest():
         ("a quoted gates_ref key", caller(G, Rf.replace("gates_ref:", '"gates_ref":'), Rv)),
         ("a gates_ref expression", caller(G, Rf.replace(N, "${{ vars.X }}"), Rv)),
         ("an uppercase SHA", caller(G.replace(N, "A" * 40), Rf, Rv)),
+        ("text after the SHA that is not a comment", caller(G.replace("\n", " extra\n"), Rf, Rv)),
+        ("text after a gates_ref SHA that is not a comment", caller(G, Rf.replace("\n", " extra\n"), Rv)),
+        ("a tab-indented call", caller(G.replace("    uses", "\tuses"), Rf, Rv)),
+        ("a gates_ref in a flow mapping", caller(G, "      {gates_ref: %s}\n" % N, Rv)),
+        ("a gates_ref as a list item", caller(G, "      - gates_ref: %s\n" % N, Rv)),
+        ("a gates_ref key in capitals", caller(G, Rf.replace("gates_ref", "GATES_REF"), Rv)),
     )
     for name, text in odd:
         d = fresh("odd")
@@ -1320,6 +1445,20 @@ def selftest():
         for p, _ in STANDING:
             write(d, p, date_marker(read(os.path.join(RELEASE, srcs[p])), today))
         ok("caller-noncanonical" in {c_ for c_, _ in check(d)}, "and the check is red on %s" % name)
+    d = fresh("yaml-ext")
+    write(d, WF + "/ci.yaml", caller(G, Rf, Rv))
+    init(d, "N1")
+    ok(pins_of(d) == [("gates", N1), ("gates_ref", N1), ("review", N1)] and not os.path.exists(os.path.join(d, TIER1[0])),
+       "a caller in a .yaml file is read like one in a .yml file: its pins move and no twin is written")
+    d = fresh("bad-tier1")
+    write(d, TIER1[0], caller(G.replace("uses: ", 'uses: "').replace("\n", '"\n'), Rf, Rv))
+    msg = []
+    try:
+        init(d)
+    except Problem as p:
+        msg = str(p).split("\n")
+    ok(len(msg) == 1 and "in a form init does not read" in msg[0],
+       "a tier1.yml with a noncanonical call draws that one PROBLEM line, and no second line saying it does not call the toolkit")
     d = fresh("foreign-ref")
     other = "jobs:\n  n:\n    uses: someone/else/.github/workflows/y.yml@%s\n    with:\n      gates_ref: main\n" % ("a" * 40)
     write(d, WF + "/nightly.yml", other)
@@ -1342,6 +1481,15 @@ def selftest():
     write(d, WF + "/sec.yml", "jobs:\n  s:\n    uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@%s # main\n" % ("1" * 40))
     init(d)
     ok(not os.path.exists(os.path.join(d, SECURITY[0])), "a security caller under another file name counts, and no second one is written")
+    d = fresh("security-first-file")
+    write(d, WF + "/a-sec.yml", "jobs:\n  s:\n    uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@%s # main\n" % ("1" * 40))
+    write(d, WF + "/z-other.yml", "name: z\non: push\njobs: {}\n")
+    init(d)
+    ok(not os.path.exists(os.path.join(d, SECURITY[0])), "a security caller counts whichever workflow file it is in, the first or the last read")
+    for tail, why in ((" extra", "text after the SHA that is not a comment"),):
+        d = fresh("security-odd")
+        write(d, WF + "/notes.yml", "jobs:\n  s:\n    uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@%s%s\n" % ("1" * 40, tail))
+        ok(refused(d, "security-noncanonical"), "a security call with %s is refused" % why)
     d = fresh("security-own")
     own = "name: codeql\non: push\njobs: {}\n"
     write(d, SECURITY[0], own)
@@ -1381,7 +1529,12 @@ def selftest():
         ("markers behind", every(lambda t: t.replace("docs/02 " + relv, "docs/02 " + behind, 1)), {"behind"}),
         ("markers ahead", every(lambda t: t.replace("docs/02 " + relv, "docs/02 " + ahead, 1)), {"ahead"}),
         ("the files split", edit("REVIEW.md", lambda t: t.replace("docs/02 " + relv, "docs/02 " + behind, 1)), {"behind", "split"}),
-        ("the pins split", edit(REVIEWC[0], lambda t: t.replace(N, N1)), {"pin-split"}),
+        ("the review pin differing", edit(REVIEWC[0], lambda t: t.replace(N, N1)), {"pin-split"}),
+        ("the gates_ref differing", edit(TIER1[0], lambda t: t.replace("gates_ref: " + N, "gates_ref: " + N1)), {"pin-split"}),
+        ("the gates.yml pin differing", edit(TIER1[0], lambda t: t.replace("gates.yml@" + N, "gates.yml@" + N1)), {"pin-split"}),
+        ("two gates_refs for one gates call", edit(TIER1[0], lambda t: t + "  again:\n    with:\n" + Rf), {"pin-unpaired"}),
+        ("two markers on one line", edit("CLAUDE.md", lambda t: MARKER.sub(lambda m: m.group(0) + " ~~" + m.group(0).replace(relv, ahead) + "~~", t, count=1)), {"duplicate-marker"}),
+        ("an unreadable marker before a readable one on one line", edit("CLAUDE.md", lambda t: MARKER.sub(lambda m: "**Protocol version: old** " + m.group(0), t, count=1)), {"duplicate-marker"}),
         ("no callers", lambda d: [os.remove(os.path.join(d, p)) for p in (TIER1[0], REVIEWC[0])], {"pin-missing"}),
         ("no review caller", lambda d: os.remove(os.path.join(d, REVIEWC[0])), {"pin-missing"}),
         ("a gates call with no gates_ref", edit(TIER1[0], without(lambda l: "gates_ref: " + N in l)), {"pin-missing", "pin-unpaired"}),
@@ -1414,7 +1567,7 @@ def selftest():
         return f
     _write_tmp = third_fails(real_tmp)
     ok(refused(d, "write-prepare-failed") and snapshot(d) == {},
-       "a failure while preparing the third file leaves the tree as it was, temporary files included")
+       "a failure while preparing the third file leaves the tree as it was, with no temporary file left behind")
     _write_tmp, n_[0] = real_tmp, 0
     d = fresh("write-move")
     _replace = third_fails(real_replace)
@@ -1438,7 +1591,21 @@ def selftest():
             ok(text.count(POINTER_PARAGRAPH) == 1 and POINTER_PARAGRAPH in region_body(text),
                "init/release/%s carries the %s line once, inside its region" % (name, POINTER_WORD))
             ok([v for _, v in markers(text)] == [rel], "init/release/%s carries one marker, at %s" % (name, relv))
-    ok(label == cite, "the release's callers label their gates pins %s, the version CITATION.cff declares" % cite)
+    ok(label == cite, "the release's tier1 and review callers label every gates pin %s, the version CITATION.cff declares" % cite)
+    relbad2 = fresh("release-label")
+    for n_ in (TIER1[1], REVIEWC[1]):
+        write(relbad2, n_, read(os.path.join(RELEASE, n_)))
+    write(relbad2, REVIEWC[1], read(os.path.join(RELEASE, REVIEWC[1])).replace(" # " + label, " # v0.0.1"))
+    ok(fires("release-no-label", lambda: release_label(relbad2)), "a review caller labelled differently from tier1 is refused")
+    ok(LOCATOR_ALLOW == {"chiibitsu/vibeos", "chiibitsu-labs/gates", "chiibitsu-labs/security-checks"}
+       and USES_ALLOW - LOCATOR_ALLOW == {"actions/checkout", "actions/setup-node"} and ZONE_PASS == {"UTC", "GMT"},
+       "the shape check's three exemption lists are exactly: vibeOS, gates and security-checks; plus two public actions for `uses:`; and the bare words UTC and GMT")
+    ok(all(VIBEOS_ORIGIN.search(u) for u in ("https://github.com/chiibitsu/vibeOS", "https://github.com/chiibitsu/vibeos.git",
+                                             "git@github.com:chiibitsu/vibeOS.git", "ssh://git@github.com/chiibitsu/vibeOS"))
+       and not any(VIBEOS_ORIGIN.search(u) for u in ("https://github.com/chiibitsu/vibeOS-fork", "https://github.com/notchiibitsu/vibeOS",
+                                                     "https://evil.example/https://github.com/chiibitsu/vibeOS", "/tmp/chiibitsu/vibeOS",
+                                                     "https://github.com.evil.example/chiibitsu/vibeOS")),
+       "derive's origin test accepts the four GitHub spellings of chiibitsu/vibeOS and none of five lookalikes")
     for name, want in ((TIER1[1], ["gates", "gates_ref"]), (REVIEWC[1], ["review"]), (SECURITY[1], [])):
         pins, bad, sec_bad, security = scan(read(os.path.join(RELEASE, name)))
         ok(bad == [] and sec_bad == [] and [k for _, k, _ in pins] == want and security == (name == SECURITY[1]),
@@ -1507,6 +1674,7 @@ def selftest():
     write(relbad, "PROTOCOL", "# nothing\n")
     ok(fires("release-no-protocol", lambda: release_version(relbad)), "a release with no protocol line is refused")
     write(relbad, TIER1[1], G + Rf.replace("\n", " # v9.9\n"))
+    write(relbad, REVIEWC[1], Rv.replace("\n", " # v9.9\n"))
     ok(fires("release-no-label", lambda: release_label(relbad)), "a release whose callers do not carry one version label beside every pin is refused")
 
     origin = fresh("vibeos-origin")
@@ -1536,9 +1704,10 @@ def selftest():
     with contextlib.redirect_stdout(io.StringIO()) as out:
         rcs = [main(["x", "init", "--sha", N]), main(["x", "init", "-t", "--sha", N]),
                main(["x", "check", a, "--live-standing-orders"]), main(["x", "init", a, "--adopt", "--sha", N]),
-               main(["x", "nope", a])]
-    ok(rcs == [2] * 5 and not os.path.exists("--sha") and not os.path.exists("-t"),
-       "a flag where TARGET belongs, an unknown flag and an unknown command each exit 2 with the usage, and create nothing")
+               main(["x", "nope", a]), main(["x", "init", "", "--sha", N])]
+    ok(rcs == [2] * 6 and out.getvalue().count("gates_init.py init   TARGET --sha SHA") == 6
+       and not os.path.exists("--sha") and not os.path.exists("-t") and not os.path.exists("CLAUDE.md"),
+       "a flag where TARGET belongs, an unknown flag, an unknown command and an empty TARGET each exit 2, print the usage, and create nothing")
     with contextlib.redirect_stdout(io.StringIO()) as out:
         rc_ok, rc_red = cmd_check(a), cmd_check(fresh("empty-check"))
     ok(rc_ok == 0 and rc_red == 1 and out.getvalue().count("FAIL [standing-orders]") == 4,
@@ -1568,7 +1737,7 @@ def selftest():
 def main(argv):
     if argv[1:] == ["--selftest"]:
         return selftest()
-    if len(argv) >= 3 and argv[1] in ("init", "check", "derive") and not argv[2].startswith("-"):
+    if len(argv) >= 3 and argv[1] in ("init", "check", "derive") and argv[2] and not argv[2].startswith("-"):
         target, rest = os.path.realpath(argv[2]), argv[3:]
         if argv[1] == "check" and not rest:
             return cmd_check(target)

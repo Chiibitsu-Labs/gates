@@ -146,7 +146,7 @@ file. It never touches a `.gitignore`, a hook, a README or a board, never writes
 symlink or a hard link, and never commits or pushes.
 
 ```sh
-git clone https://github.com/Chiibitsu-Labs/gates && git -C gates checkout <sha>
+git clone https://github.com/Chiibitsu-Labs/gates && git -C gates checkout <sha>   # a full clone
 git -C gates rev-parse HEAD                       # must print <sha>
 python3 gates/init/gates_init.py init /path/to/repo --sha <sha>
 ```
@@ -157,21 +157,26 @@ reads on the repo's **default branch** (never the working branch, which the chan
 can edit), or a SHA the founder states for a bump. Confirm `git rev-parse HEAD` before
 running. init refuses to run unless `--sha` equals its own checkout's `HEAD` and that
 checkout has no local changes, untracked files or files hidden from `git status`
-(skip-worktree, assume-unchanged), which catches a wrong clone; it cannot vouch for itself,
-so the `rev-parse` you ran is the check that counts.
+(skip-worktree, assume-unchanged), is a full clone, not a shallow one, and carries the
+release tag its callers are labelled with at `HEAD`. That catches a wrong clone; it cannot
+vouch for itself, so the `rev-parse` you ran is the check that counts. The older "How to
+call it" section below describes wiring a caller by hand from the Releases table; in a repo
+that carries these standing orders, the two sources above govern, and the callers init
+writes say so in their first lines.
 
 **One rule for every match: detect wide, accept narrow, refuse the rest.** A line is
 *detected* by a loose test and *accepted* only in the one exact form init itself writes.
-Detected and not accepted is refused by init and red in the check, so no spelling has to be
-recognised to be safe.
+Detected and not accepted is refused by init and red in the check, so a spelling init can
+see is never guessed at. Two shapes it cannot see by reading lines are under Known gaps.
 
 - **Standing-orders files** carry one template-owned region between
   `<!-- gates:template-owned:begin -->` and `<!-- gates:template-owned:end -->`, each alone
   on its line at column 0. init rewrites the region and keeps every byte outside it, in the
   file's own line ending. Any line that carries the marker text in another way (indented,
   with other text, with trailing spaces) is refused, and so is a file with no region, more
-  than one marker of either kind, the end before the begin, a marker in a fenced block, mixed
-  line endings, or bytes that are not UTF-8.
+  than one marker of either kind, the end before the begin, a marker in a fenced block, code
+  fences that do not pair up around a marker, mixed line endings, a line break that is
+  neither LF nor CRLF, or bytes that are not UTF-8.
 - **A file with no region is not adopted, and a repo that reads the standing orders live is
   not handled.** Both are refused with a message. Adoption and the live-read case are a
   later slice's (the founder's ruling on this pull request; vibeOS repo-bootstrap spec, open
@@ -197,12 +202,13 @@ recognised to be safe.
   pin (its `# main` hint is for Renovate), and a fresh one still needs its header's step 1.
   A `security.yml` of the repo's own is left alone, and init says it wrote no security caller.
 - **All or nothing:** any refusal in any file stops the run before a write. Writes go to
-  temporary files first and are then moved into place; if a move fails, init names the files
+  new, randomly named temporary files first and are then moved into place; if a move fails, init names the files
   it had already moved, never "nothing was written". TARGET must be an existing directory.
 
 **The check** runs in `gates.yml` after the gates: its `--selftest` first, then `check` on
 your tree. It is red, with expected, found and the paragraph to read, for a missing or
-unreadable file among the three, a missing, unreadable or duplicated marker, a marker behind
+unreadable file among the three, a line break that is neither LF nor CRLF, a missing,
+unreadable or duplicated marker (two on one line count as two), a marker behind
 or ahead of the release, the three files split between versions, a toolkit or security line
 that is not in init's form, a missing gates, `gates_ref` or review pin, a gates call without
 its `gates_ref`, or the pins disagreeing. It asserts the markers and the pins, never the
@@ -214,9 +220,10 @@ that same PR. `selftest.yml` does not run the check over this repo; `caller-smok
 once its pin reaches a release that carries it (see the release checklist).
 
 **Every refusal and every red is named** in `REFUSALS` and `REDS` in the script. Its
-`--selftest` fails unless each one fired during the run and the two lists match the code by
-name, in both directions. A guard that is switched off, or added without a case, turns the
-selftest red.
+`--selftest` fails unless each one fired at least once during the run and the two lists
+match the code by name, in both directions. That proves each one can happen, and catches a
+refusal added without any case. It does not prove every condition inside every guard: the
+cases cover what their ok-lines say and no more.
 
 **The team-safe copy.** This repository is public, so it never carries vibeOS's own
 `chiibitsu/vibeOS:templates/claude-md.md`. `init/release/` holds a copy derived from vibeOS's
@@ -421,11 +428,19 @@ In this order, in one sitting:
 
 ## Known gaps
 
-**`gates init` and the standing-orders check read workflows line by line, not as YAML.** A
-line in exactly the accepted form inside a block scalar (a `run: |` script that prints a
-`uses:` line, say) is indistinguishable from a real call without a YAML parser: init would
-move it and the check would count it. Every other spelling is detected and refused, so the
-gap is that one shape. The same reading applies to the security caller.
+**`gates init` and the standing-orders check read workflows line by line, not as YAML.** Two
+shapes follow from that, and both apply to the security caller too:
+
+- A line in exactly the accepted form inside a block scalar (a `run: |` script that prints
+  a `uses:` line, say) is indistinguishable from a real call: init would move it and the
+  check would count it.
+- A call or a `gates_ref` key spelled with YAML's own escapes or structure, so that the
+  toolkit's path or the key does not appear on the line as text (`.github\/workflows`,
+  `"gates\x5fref"`, a double-quoted line continuation, an explicit `? gates_ref` key), is
+  not detected at all: init would write callers beside it and the check would not count it.
+
+Every spelling that does carry the path or the key as text is detected and, unless it is the
+accepted form, refused.
 
 Stated rather than papered over. Most are inherited from `check_secrets.py`'s own
 header, which is the honest account of what that scanner does not do.
