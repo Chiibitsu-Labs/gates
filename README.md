@@ -439,8 +439,10 @@ In this order, in one sitting:
    other repo moves when a session runs `init` from the new release; until then its pin, and
    so its check, is unchanged. "Red when stale" means stale against the pinned release,
    never against vibeOS's head.
-5. **Move `caller-smoke.yml`'s pin** to the new release in a follow-up PR, as before. The
-   standing-orders check does not run over this repo: the founder ruled it exempt
+5. **Move `caller-smoke.yml`'s pin** to the new release in a follow-up PR, as before, and
+   only to a release that carries the exemption: one that carries the check without it is
+   red here. From that release on the standing-orders check does not run over this repo: the
+   founder ruled it exempt
    (2026-11-24), and `gates.yml` says so on every run (see "Standing orders" above). On the
    first bump to a release that carries the exemption, read the run's log for the
    `EXEMPT [standing-orders]` line: the exemption has not run in CI until then.
