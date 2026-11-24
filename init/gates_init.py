@@ -876,7 +876,7 @@ def cmd_check(target):
 # string: each finds its text by structure, and the founder's name is matched by its SHA-256
 # digest, which keeps the literal out of this file (the shape list below says what that hides).
 
-POINTER_WORD = "pointer"  # PROPOSED, the founder's word to pick: see the PR.
+POINTER_WORD = "vibeOS pointer"  # the founder's word, 2026-11-24
 POINTER_PARAGRAPH = (
     "**The %s line.** A session that can read `chiibitsu/vibeOS` also follows that repo's "
     "`chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its "

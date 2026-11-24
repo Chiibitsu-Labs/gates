@@ -13,7 +13,7 @@ line must equal it and Tier 1 holds it there; until then the check is by hand.
 `CLAUDE.md`'s Protocol version paragraph says how, and has the repair steps and the only two sources a gates SHA may
 come from.
 
-**The pointer line.** A session that can read `chiibitsu/vibeOS` also follows that repo's `chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its repo-specific gotchas), never its placeholders, at its published head, never a checkout's working tree, a branch or a fork (`chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09). Where the two differ, the stricter rule wins; where neither is stricter, vibeOS's does. A session that cannot read `chiibitsu/vibeOS` skips this paragraph. The steps for running `init` and repairing these three files are this copy's to state: where that template words the same repair without the command, follow the command here.
+**The vibeOS pointer line.** A session that can read `chiibitsu/vibeOS` also follows that repo's `chiibitsu/vibeOS:templates/claude-md.md`: its rules (its template-owned region and its repo-specific gotchas), never its placeholders, at its published head, never a checkout's working tree, a branch or a fork (`chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09). Where the two differ, the stricter rule wins; where neither is stricter, vibeOS's does. A session that cannot read `chiibitsu/vibeOS` skips this paragraph. The steps for running `init` and repairing these three files are this copy's to state: where that template words the same repair without the command, follow the command here.
 
 ## Before you change anything: read `CLAUDE.md`
 

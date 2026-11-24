@@ -250,7 +250,7 @@ founder's timezone and name, and the deploy-after-merge section. It rewrites vib
 `chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
 resolve; it names the real `init` command where vibeOS's template says "gates init"; it
 names the consuming repo's spec folder without citing it as a path that already exists; it
-tells a session that the callers' SHAs are already set; and it adds a pointer line to each
+tells a session that the callers' SHAs are already set; and it adds a vibeOS pointer line to each
 file's region, which sends a session that can read vibeOS to that repo's rules and keeps
 the `init` steps as this copy's own. `gates_init.py` lists exactly which shapes the checks
 match: `owner/repo` locators in five positions against an allowlist (a backticked or
