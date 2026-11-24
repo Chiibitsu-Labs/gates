@@ -75,9 +75,15 @@ SECURITY = (WF + "/security.yml", "security-ci.yml")
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 # Any ref, so a tag or branch pin is SEEN (and refused) rather than invisible to the check.
-GATES_USES = re.compile(r"((?i:chiibitsu-labs/gates)/\.github/workflows/(gates|review)\.ya?ml@)"
-                        r"([^\s#'\"]+)([ \t]*#[ \t]*v[0-9][0-9.]*)?")
-GATES_REF = re.compile(r"(gates_ref:[ \t]*['\"]?)([^\s#'\"]+)(['\"]?)([ \t]*#[ \t]*v[0-9][0-9.]*)?")
+# Both are anchored on the YAML key at a line's start, so a pin inside a comment, or one
+# owned by a lookalike name such as `notchiibitsu-labs/gates`, is not the toolkit's.
+# GATES_USES groups: 1 key and opening quote, 2 owner/path, 3 kind, 4 extension, 5 ref,
+# 6 closing quote, 7 version label.
+GATES_USES = re.compile(r"^([ \t]*(?:-[ \t]+)?uses:[ \t]*['\"]?)((?i:chiibitsu-labs)/gates/\.github/"
+                        r"workflows/(gates|review)(\.ya?ml)@)([^\s#'\"]+)(['\"]?)"
+                        r"([ \t]*#[ \t]*v[0-9][0-9.]*)?", re.M)
+GATES_REF = re.compile(r"^([ \t]*gates_ref:[ \t]*['\"]?)([^\s#'\"]+)(['\"]?)([ \t]*#[ \t]*v[0-9][0-9.]*)?",
+                       re.M)
 LIVE_INPUT = re.compile(r"^[ \t]*standing_orders_live:", re.M)
 # The toolkit's name before the move to the org. GitHub does not follow a transfer redirect
 # for `uses:`, so a caller still spelled this way is broken, and init will not guess at it.
@@ -99,18 +105,11 @@ def parse_region(text):
     """Return (begin_line, end_line) indexes of the one well-formed pair, or raise Problem
     naming the malformed shape. Line-based; a fence is a line opening with ``` or ~~~."""
     lines = text.split("\n")
-    begins, ends, fence = [], [], None
-    for i, line in enumerate(lines):
+    begins, ends = [], []
+    for i, (line, fenced) in enumerate(zip(lines, fence_map(lines))):
         s = line.strip()
-        if fence is None and (s.startswith("```") or s.startswith("~~~")):
-            fence = s[:3]
+        if fenced:
             if MARKER_KEY in line:
-                raise Problem("a region marker sits on a fence line (line %d)" % (i + 1))
-            continue
-        if fence is not None:
-            if s.startswith(fence):
-                fence = None
-            elif MARKER_KEY in line:
                 raise Problem("a region marker sits inside a fenced block (line %d)" % (i + 1))
             continue
         if s == BEGIN:
@@ -128,6 +127,30 @@ def parse_region(text):
     if ends[0] < begins[0]:
         raise Problem("the end marker comes before the begin marker")
     return begins[0], ends[0]
+
+
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def fence_map(lines):
+    """For each line, True when it opens, sits inside or closes a fenced block. A fence
+    closes only on a line of the same character, at least as long, and nothing else."""
+    out, open_ = [], None
+    for line in lines:
+        l = line.rstrip("\r")
+        if open_ is None:
+            m = FENCE.match(l)
+            if m and not (m.group(1)[0] == "`" and "`" in l[m.end():]):
+                open_ = m.group(1)
+                out.append(True)
+                continue
+            out.append(False)
+        else:
+            out.append(True)
+            m = FENCE.match(l)
+            if m and m.group(1)[0] == open_[0] and len(m.group(1)) >= len(open_) and not l[m.end():].strip():
+                open_ = None
+    return out
 
 
 def has_any_marker(text):
@@ -185,7 +208,7 @@ def release_version(release=RELEASE):
 
 def guard(target, rel):
     """Refuse a path init would write if it, or any directory between it and the target,
-    is a symlink. A link could send the write outside the repo, or onto another of the six
+    is a symlink, or if it is a file with a second hard link. A link could send the write outside the repo, or onto another of the six
     files (`CLAUDE.md -> AGENTS.md` flips both on every run)."""
     p = target
     for part in rel.split("/"):
@@ -193,6 +216,8 @@ def guard(target, rel):
         if os.path.islink(p):
             raise Problem("%s: %s is a symlink; init never writes through one. Left untouched."
                           % (rel, os.path.relpath(p, target)))
+    if os.path.isfile(p) and os.stat(p).st_nlink > 1:
+        raise Problem("%s has another hard link; init never writes through one. Left untouched." % rel)
     return os.path.join(target, rel)
 
 
@@ -210,7 +235,7 @@ def pins_in(text):
     """Every gates pin in a workflow that calls the toolkit: (kind, ref), kind 'gates',
     'review' or 'gates_ref'. A `gates_ref:` key in a workflow that does not call the toolkit
     by `uses:` is someone else's and is not counted."""
-    uses = [(m.group(2), m.group(3)) for m in GATES_USES.finditer(text)]
+    uses = [(m.group(3), m.group(5)) for m in GATES_USES.finditer(text)]
     if not uses:
         return []
     return uses + [("gates_ref", m.group(2)) for m in GATES_REF.finditer(text)]
@@ -230,17 +255,19 @@ def is_ancestor(history, old, new):
 def move_pins(text, sha, uses_comment, ref_comment):
     if not GATES_USES.search(text):
         return text
-    text = GATES_USES.sub(lambda m: "Chiibitsu-Labs/gates/.github/workflows/%s.yml@%s%s"
-                          % (m.group(2), sha, uses_comment), text)
+    text = GATES_USES.sub(lambda m: m.group(1) + m.group(2) + sha + m.group(6) + uses_comment, text)
     return GATES_REF.sub(lambda m: m.group(1) + sha + m.group(3) + ref_comment, text)
 
 
 def add_live_input(text):
-    """Put `standing_orders_live: true` under the gates job's `with:`, beside gates_ref."""
-    if LIVE_INPUT.search(text) or not GATES_REF.search(text):
+    """Put `standing_orders_live: true` under the gates job's `with:`, beside gates_ref, in
+    the file's own line ending; an explicit `false` there becomes `true`."""
+    if LIVE_INPUT.search(text):
+        return re.sub(r"^([ \t]*standing_orders_live:[ \t]*)false\b", r"\1true", text, flags=re.M)
+    if not GATES_REF.search(text):
         return text
-    return re.sub(r"^([ \t]*)(gates_ref:[^\n]*)$", lambda m: "%s%s\n%sstanding_orders_live: true"
-                  % (m.group(1), m.group(2), m.group(1)), text, count=1, flags=re.M)
+    return re.sub(r"^([ \t]*)(gates_ref:[^\n]*?)(\r?)$", lambda m: "%s%s%s\n%sstanding_orders_live: true%s"
+                  % (m.group(1), m.group(2), m.group(3), m.group(1), m.group(3)), text, count=1, flags=re.M)
 
 
 def comment_of(text, regex, group):
@@ -266,8 +293,9 @@ def adopt_point(lines):
             if lines[i].strip() == "---":
                 start = i + 1
                 break
+    fenced = fence_map(lines)
     for i in range(start, len(lines)):
-        if lines[i].startswith("# "):
+        if lines[i].startswith("# ") and not fenced[i]:
             return i + 1
     return start
 
@@ -311,9 +339,11 @@ def plan(target, sha, today, history, release=RELEASE, adopt=False, live=False):
                 lines = cur.split("\n")
                 at = adopt_point(lines)
                 b, e = parse_region(fresh)
-                block = fresh.split("\n")[b:e + 1]
-                new = "\n".join(lines[:at] + [""] + block + [""] + lines[at:])
-                writes.append((path, date_marker(new, today), "adopted"))
+                block = date_marker("\n".join(fresh.split("\n")[b:e + 1]), today).split("\n")
+                cr = "\r" if cur.count("\r\n") * 2 > cur.count("\n") else ""
+                block = [l + cr for l in [""] + block + [""]]
+                new = "\n".join(lines[:at] + block + lines[at:])
+                writes.append((path, new, "adopted"))
                 notes.append("adopt   %s: the region went in at line %d; every line already there "
                              "is still there. Text outside the region that repeats a template rule "
                              "is a stale copy, not a repo rule: delete it in this same PR. Keep what "
@@ -358,7 +388,7 @@ def plan(target, sha, today, history, release=RELEASE, adopt=False, live=False):
                             "move; GitHub does not follow that redirect for `uses:`. Rename it "
                             "to Chiibitsu-Labs/gates by hand first." % p)
     t1 = read(os.path.join(release, TIER1[1]))
-    uses_c = comment_of(t1, GATES_USES, 4)
+    uses_c = comment_of(t1, GATES_USES, 7)
     ref_c = comment_of(t1, GATES_REF, 4)
     kinds = set()
     for p, t in texts.items():
@@ -528,8 +558,11 @@ def cmd_check(target, live):
         print("FAIL [standing-orders] %s: %s" % (code, msg))
     if fails:
         return 1
-    print("ok [standing-orders] markers equal the pinned release (%s), and the gates, gates_ref "
-          "and review pins name one SHA" % vstr(release_version()))
+    compared = "REVIEW.md's marker equals" if live else "the CLAUDE.md, AGENTS.md and REVIEW.md markers equal"
+    print("ok [standing-orders] %s the pinned release (%s)%s, and the gates, gates_ref and review "
+          "pins name one SHA. Markers and pins only, never the bodies." % (
+              compared, vstr(release_version()),
+              "; CLAUDE.md and AGENTS.md exist and carry no marker" if live else ""))
     return 0
 
 
@@ -539,7 +572,8 @@ def cmd_check(target, live):
 # expected, so a template that moved under an edit stops the derivation instead of letting
 # the private text through. No edit and no check below spells out a private string: each
 # finds its text by structure (a heading, a paragraph's shape, a bold lead), and the
-# founder's name is matched by its SHA-256 digest. Spelling them out here would publish them.
+# founder's name is matched by its SHA-256 digest, which keeps the literal out of this file
+# (see the shape list below for what that does and does not hide).
 
 POINTER_WORD = "pointer"  # PROPOSED, the founder's word to pick: see the PR.
 POINTER_PARAGRAPH = (
@@ -679,6 +713,11 @@ def derive_claude(t):
          "`CLAUDE.md` and `AGENTS.md` point there rather than copying it.", 1),
         ("which of this file's product-repo rules", "which of the template's product-repo rules", 1),
     ])
+    t = _sub(t, "and the by-hand steps above repair that one file.",
+             "and `init/gates_init.py init --live-standing-orders`, run from a clone at the\n"
+             "pinned SHA, repairs that one file.")
+    t = _sub(t, "run `gates init` in this repo's root,",
+             "run `python3 <the clone>/init/gates_init.py init . --sha <that SHA>` in this repo's root,")
     t = _sub(t, "vibeOS `docs/03`'s \"Working with the founder\" holds",
              "vibeOS `docs/03`'s section on working with the founder holds")
     t = _sub(t, "never copy from vibeOS `main`, which no marker-scheme repo reads.",
@@ -697,7 +736,8 @@ def derive_text(name, text, version_comment):
     else:
         # The callers' pin label names the release being cut (CITATION.cff), never the one
         # vibeOS's template was last bumped to.
-        text = GATES_USES.sub(lambda m: m.group(1) + m.group(3) + " # " + version_comment, text)
+        text = GATES_USES.sub(lambda m: m.group(1) + m.group(2) + m.group(5) + m.group(6) + " # "
+                              + version_comment, text)
         text = GATES_REF.sub(lambda m: m.group(1) + m.group(2) + m.group(3) + " # " + version_comment, text)
     return text
 
@@ -706,18 +746,26 @@ def derive_text(name, text, version_comment):
 # private string. What they catch, exactly: an owner-qualified name whose owner is this
 # company's (`chiibitsu…/x`, bare or anywhere); any `owner/repo:path` or `owner/repo#N`;
 # any github.com or raw.githubusercontent.com URL's owner/repo; a backticked `owner/repo`
-# whose first segment is not an in-repo directory; a region-prefixed IANA zone name; a UTC
-# or GMT offset, and a bare `+08:00`/`+0800`-shaped offset; the founder's name, by digest; a
-# heading naming the ledger; a bold lead naming a vault connector. An unbackticked
-# `acme/widget` in prose and a zone abbreviation are NOT caught.
+# whose first segment is not an in-repo directory; a region-prefixed IANA zone name and
+# tzdata's single-segment ones; a UTC or GMT offset in any case, and a bare `+08:00`/`+0800`-
+# shaped offset; the founder's name, by digest; a heading naming the ledger; a bold lead
+# naming a vault connector. NOT caught: an unbackticked `acme/widget` in prose, a zone
+# abbreviation such as PHT, and any other person's or client's name, which only a reading
+# of the derived diff can find. The digest keeps the name's spelling out of this source; a
+# four-letter name's digest is guessable, so it hides the literal, not the name.
 LOCATOR_ALLOW = {"chiibitsu/vibeos", "chiibitsu-labs/gates", "chiibitsu-labs/security-checks"}
 OWNER_QUALIFIED = re.compile(r"(?<![\w.-])(chiibitsu[\w-]*)/([A-Za-z0-9._-]*[A-Za-z0-9_-])", re.I)
 COLON_LOCATOR = re.compile(r"(?<![\w./:-])([A-Za-z0-9][\w-]*)/([\w.-]+)(?=:[\w./-]|#\d)")
 GITHUB_URL = re.compile(r"(?:github\.com|raw\.githubusercontent\.com)/([\w-]+)/([\w.-]*[\w-])", re.I)
 BACKTICK_PAIR = re.compile(r"`([\w-]+)/([\w.-]+)`")
 IANA = re.compile(r"\b(?:Africa|America|Antarctica|Arctic|Asia|Atlantic|Australia|Europe|Indian|"
-                  r"Pacific|Etc|US|Canada|Brazil|Chile|Mexico)/[A-Z][\w+-]+")
-OFFSET = re.compile(r"\b(?:UTC|GMT)\s*[+\u2212-]\s*\d{1,2}(?::?\d{2})?\b"
+                  r"Pacific|Etc|US|Canada|Brazil|Chile|Mexico)/[A-Z][\w+-]+"
+                  # tzdata's single-segment zone names (public data, not a private list)
+                  r"|\b(?:Cuba|Egypt|Eire|GB-Eire|Greenwich|Hongkong|Iceland|Iran|Israel|Jamaica|"
+                  r"Japan|Kwajalein|Libya|Navajo|NZ-CHAT|Poland|Portugal|PRC|ROC|ROK|Singapore|"
+                  r"Turkey|UCT|Universal|W-SU|Zulu|CST6CDT|EST5EDT|MST7MDT|PST8PDT|EST|MST|HST|"
+                  r"GMT0|GMT\+0|GMT-0)\b")
+OFFSET = re.compile(r"\b(?i:UTC|GMT)\s*[+\u2212-]\s*\d{1,2}(?::?\d{2})?\b"
                     r"|(?:(?<=\d)|(?<![\w:.+\u2212-]))[+\u2212-](?:0\d|1[0-4]):?[0-5]\d(?![\d:])")
 LEDGER_HEADING = re.compile(r"^#{1,6}\s.*\bledger\b", re.I | re.M)
 VAULT_LEAD = re.compile(r"\*\*[^*\n]*\bvault\b[^*\n]*\bconnector\b[^*\n]*\*\*", re.I)
@@ -760,9 +808,14 @@ def protocol_of(vibeos):
     return tuple(int(x or 0) for x in m.groups())
 
 
-def published(vibeos):
-    """The commit derive may name: the checkout must be clean, untracked files included, and
-    its HEAD must equal origin/main as last fetched. Anything else is rules no vibeOS merge
+VIBEOS_ORIGIN = re.compile(r"(?i)^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
+                           r"chiibitsu/vibeos(?:\.git)?/?$")
+
+
+def published(vibeos, origin_rx=VIBEOS_ORIGIN):
+    """The commit derive may name: the checkout's origin must be chiibitsu/vibeOS on GitHub,
+    it must be clean, untracked files included, and its HEAD must equal origin/main as last
+    fetched (a fetch is the session's step; this cannot see a newer push). Anything else is rules no vibeOS merge
     approved, labelled as a published commit."""
     rc, dirty = git(vibeos, "status", "--porcelain", "--untracked-files=all")
     if rc != 0:
@@ -770,6 +823,10 @@ def published(vibeos):
     if dirty:
         raise Problem("derive: the vibeOS checkout has local changes or untracked files; derive "
                       "only from a clean checkout of its published head")
+    rc, url = git(vibeos, "remote", "get-url", "origin")
+    if rc != 0 or not origin_rx.search(url):
+        raise Problem("derive: the vibeOS checkout's origin is %r, not chiibitsu/vibeOS on GitHub"
+                      % (url or None))
     rc, head = git(vibeos, "rev-parse", "HEAD")
     rc2, main = git(vibeos, "rev-parse", "--verify", "-q", "refs/remotes/origin/main")
     if rc != 0 or rc2 != 0 or not main:
@@ -936,10 +993,13 @@ def selftest():
         "fenced": "# AGENTS.md\n```\n" + BEGIN + "\nx\n" + END + "\n```\n",
         "unpaired": "\n".join(gl[:ge] + gl[ge + 1:]),
         "inline": "# AGENTS.md\nsee " + BEGIN + " here\n",
+        "fenced, four backticks": "# AGENTS.md\n````md\n```\n" + BEGIN + "\nx\n" + END + "\n```\n````\n",
+        "fenced, info line": "# AGENTS.md\n```\n```python\n" + BEGIN + "\nx\n" + END + "\n```\n",
     }
     says = {"none": "no template-owned region", "two pairs": "more than one",
             "reversed": "before the begin", "fenced": "inside a fenced block",
-            "unpaired": "unpaired", "inline": "not alone on its line"}
+            "unpaired": "unpaired", "inline": "not alone on its line",
+            "fenced, four backticks": "inside a fenced block", "fenced, info line": "inside a fenced block"}
     for shape, text in shapes.items():
         d = fresh("malformed-" + shape.replace(" ", "-"))
         write(d, "AGENTS.md", text)
@@ -965,6 +1025,13 @@ def selftest():
     before = snapshot(d)
     ok(problem(d) is not None and snapshot(d) == before, "CLAUDE.md -> AGENTS.md stops the run rather than flipping both")
 
+    d = fresh("hardlink")
+    write(outside, "notes.md", "# notes\n")
+    os.link(os.path.join(outside, "notes.md"), os.path.join(d, "CLAUDE.md"))
+    ok(problem(d, adopt=True) is not None and read(os.path.join(outside, "notes.md")) == "# notes\n",
+       "a hard-linked file stops the run, and the file it shares an inode with is untouched")
+    os.remove(os.path.join(outside, "notes.md"))
+
     # 5. adoption wraps a region into a file with none, keeping every existing byte.
     d = fresh("adopt")
     legacy = "# CLAUDE.md — legacy\n\n## Old rules\n- a stale copy of a template rule\n"
@@ -985,6 +1052,23 @@ def selftest():
     ok(any("old Protocol version line" in n for n in notes) and
        {c for c, _ in check(d)} == {"duplicate-marker"},
        "--adopt names an old marker line it leaves outside, and the check stays red on it")
+    d = fresh("adopt-crlf")
+    write(d, "CLAUDE.md", "# CLAUDE.md\r\n\r\nrule one\r\n")
+    do(d, adopt=True)
+    t = read(os.path.join(d, "CLAUDE.md"))
+    ok(t.count("\n") == t.count("\r\n"), "--adopt keeps a CRLF file all CRLF")
+    d = fresh("adopt-date")
+    old_line = "**Protocol version: vibeOS docs/02 v8.1** (this file instantiated `2025-03-04`)"
+    write(d, "CLAUDE.md", old_line + "\n\n# CLAUDE.md legacy\n")
+    do(d, adopt=True)
+    t = read(os.path.join(d, "CLAUDE.md"))
+    ok(old_line in t and DATE.search(region_body(t)).group(2) == today,
+       "--adopt dates the new region's marker and leaves an old line's date alone")
+    d = fresh("adopt-fence")
+    write(d, "CLAUDE.md", "Intro\n\n```sh\n# install\npip install x\n```\n")
+    do(d, adopt=True)
+    t = read(os.path.join(d, "CLAUDE.md"))
+    ok(t.startswith(BEGIN) or t.startswith("\n" + BEGIN), "--adopt never takes a `# ` line inside a fence as the heading")
     two = fresh("adopt-malformed")
     write(two, "CLAUDE.md", shapes["two pairs"])
     ok(problem(two, adopt=True) is not None, "--adopt never touches a file that already has markers")
@@ -1032,8 +1116,25 @@ def selftest():
     do(d, sha=N1)
     t = read(os.path.join(d, WF + "/gates.yml"))
     ok(not os.path.exists(os.path.join(d, TIER1[0])) and not os.path.exists(os.path.join(d, REVIEWC[0]))
-       and {s for _, s in pins_in(t)} == {N1} and "chiibitsu-labs/gates" not in t,
-       "a one-file caller, owner in any case, has its three pins moved and gains no second caller")
+       and {s for _, s in pins_in(t)} == {N1} and "uses: chiibitsu-labs/gates" in t,
+       "a one-file caller, owner in any case, has its three pins moved (its own spelling kept) and gains no second caller")
+    d = fresh("quoted-uses")
+    write(d, WF + "/gates.yml",
+          "jobs:\n  gates:\n    uses: \"Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s\" # v1.2.1\n"
+          "    with:\n      gates_ref: '%s' # v1.2.1\n  review:\n"
+          "    uses: 'Chiibitsu-Labs/gates/.github/workflows/review.yml@%s' # v1.2.1\n" % (N, N, N))
+    do(d, sha=N1)
+    t = read(os.path.join(d, WF + "/gates.yml"))
+    ok("gates.yml@%s\" # v" % N1 in t and "review.yml@%s' # v" % N1 in t and "gates_ref: '%s' # v" % N1 in t
+       and "v1.2.1" not in t, "quoted pins move with the label outside the quotes, and the old label goes")
+    d = fresh("commented-pins")
+    write(d, WF + "/gates.yml",
+          "jobs:\n  gates:\n    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s # v1.2.2\n"
+          "    with:\n      gates_ref: %s # v1.2.2\n"
+          "  # review:\n  #   uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@%s # v1.2.2\n"
+          "  x:\n    uses: notchiibitsu-labs/gates/.github/workflows/review.yml@%s\n" % (N, N, N, N))
+    ok({k for k, _ in pins_in(read(os.path.join(d, WF + "/gates.yml")))} == {"gates", "gates_ref"},
+       "a pin inside a YAML comment, or under a lookalike owner, is not counted as the toolkit's")
     d = fresh("foreign-gates-ref")
     other = "jobs:\n  n:\n    uses: someone/else/.github/workflows/y.yml@%s\n    with:\n      gates_ref: %s\n" % ("a" * 40, N)
     write(d, WF + "/nightly.yml", other)
@@ -1058,13 +1159,16 @@ def selftest():
        "and the tier1 caller it writes sets standing_orders_live: true")
     ok(check(d, live=True) == [], "and the live check is green on it")
     ok({c for c, _ in check(d)} == {"missing-marker"}, "while the full check still wants the two markers")
-    d = live_repo()
-    write(d, "AGENTS.md", read(os.path.join(RELEASE, "agents-md.md")))
-    ok(problem(d, live=True) is not None, "--live-standing-orders refuses a CLAUDE.md or AGENTS.md that carries a region")
+    for f, src in (("CLAUDE.md", "claude-md.md"), ("AGENTS.md", "agents-md.md")):
+        d = live_repo()
+        write(d, f, read(os.path.join(RELEASE, src)))
+        msg = problem(d, live=True)
+        ok(msg is not None and msg.startswith(f + ": "), "--live-standing-orders refuses a %s that carries a region" % f)
     d = live_repo()
     do(d, live=True)
     write(d, "CLAUDE.md", "# CLAUDE.md\n**Protocol version: vibeOS docs/02 v7.0** stale\n")
-    ok({c for c, _ in check(d, live=True)} == {"live-marked"}, "the live check is red on a marked CLAUDE.md, so the flag cannot hide a stale one")
+    ok({c for c, _ in check(d, live=True)} == {"live-marked"},
+       "the live check is red on a CLAUDE.md that carries a marker (it reads markers only, so a stale body with none still passes)")
     d = live_repo()
     do(d, live=True)
     os.remove(os.path.join(d, "AGENTS.md"))
@@ -1079,6 +1183,21 @@ def selftest():
     do(d, sha=N1, live=True)
     ok("      standing_orders_live: true\n" in read(os.path.join(d, WF + "/gates.yml")),
        "--live-standing-orders adds the input to an existing caller, beside gates_ref")
+    d = live_repo()
+    write(d, WF + "/gates.yml", ("    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s # v1.2.2\n%s"
+          "      standing_orders_live: false\n"
+          "    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@%s # v1.2.2\n" % (N, t, N)).replace("\n", "\r\n"))
+    do(d, sha=N1, live=True)
+    t2 = read(os.path.join(d, WF + "/gates.yml"))
+    ok("standing_orders_live: true\r\n" in t2 and "false" not in t2 and t2.count("\n") == t2.count("\r\n"),
+       "--live-standing-orders turns an explicit false into true, keeping CRLF")
+    d = live_repo()
+    write(d, WF + "/gates.yml", ("    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s # v1.2.2\n%s"
+          "    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@%s # v1.2.2\n" % (N, t, N)).replace("\n", "\r\n"))
+    do(d, sha=N1, live=True)
+    t2 = read(os.path.join(d, WF + "/gates.yml"))
+    ok("standing_orders_live: true\r\n" in t2 and t2.count("\n") == t2.count("\r\n"),
+       "--live-standing-orders adds the input in a CRLF caller's own line ending")
 
     # 9. the check is red for each failure, and only that failure's code fires.
     def checked(mutate):
@@ -1128,8 +1247,8 @@ def selftest():
                "init/release/%s carries the %s line once, inside its region" % (name, POINTER_WORD))
             ok([v for _, v in markers(text)] == [rel], "init/release/%s carries one marker, at %s" % (name, relv))
         elif name != SECURITY[1]:
-            ok({(m.group(4) or "").split("#")[-1].strip() for rx in (GATES_USES, GATES_REF)
-                for m in rx.finditer(text)} == {label},
+            ok({(m.group(7) or "").split("#")[-1].strip() for m in GATES_USES.finditer(text)}
+               | {(m.group(4) or "").split("#")[-1].strip() for m in GATES_REF.finditer(text)} == {label},
                "init/release/%s labels every gates pin %s, this release's CITATION.cff version" % (name, label))
     real = NAME_DIGEST
     NAME_DIGEST = hashlib.sha256(b"zorblat").hexdigest()  # a stand-in, so no probe names her
@@ -1144,7 +1263,8 @@ def selftest():
         "Zorblatty": False, "Chiibitsu Labs": False, "Chiibitsu-Labs/gates": False,
         "chiibitsu/vibeOS": False, "`docs/04:12`": False, "`canon/decisions.md`": False,
         "containers run UTC": False, "the ledger, unheaded": False, "2026-11-09": False,
-        "v8.2, PR #208": False,
+        "v8.2, PR #208": False, "Japan": True, "Zulu": True, "PST8PDT": True, "utc+5": True,
+        "2.18 MB of notification bodies": False, "Japanese": False,
     }
     for probe, bad in probes.items():
         ok(bool(leaks(probe)) == bad, "the shape check %s %r" % ("catches" if bad else "passes", probe))
@@ -1161,22 +1281,28 @@ def selftest():
     run(["git", "push", "-q", "origin", "HEAD:main"], clone)
     run(["git", "fetch", "-q", "origin"], clone)
     head = run(["git", "rev-parse", "HEAD"], clone)
-    try:
-        ok(published(clone) == head, "derive accepts a clean checkout at origin/main")
-    except Problem as p:
-        ok(False, "derive accepts a clean checkout at origin/main (%s)" % p)
+    anyorigin = re.compile(".")
 
-    def refuses(what):
+    def refuses(rx=anyorigin):
         try:
-            published(clone)
+            published(clone, rx)
         except Problem:
             return True
         return False
+    ok(refuses(VIBEOS_ORIGIN), "derive refuses a checkout whose origin is not chiibitsu/vibeOS on GitHub")
+    ok(not refuses() and published(clone, anyorigin) == head,
+       "derive accepts a clean checkout at origin/main (origin check relaxed for this local clone)")
     write(clone, "templates/x.md", "an unmerged rule\n")
-    ok(refuses("dirty"), "derive refuses a checkout with an untracked or edited file")
-    os.remove(os.path.join(clone, "templates/x.md"))
+    ok(refuses(), "derive refuses a checkout with an untracked file")
+    run(["git", "add", "templates/x.md"], clone)
+    run(["git"] + env + ["commit", "-q", "-m", "tracked"], clone)
+    run(["git", "push", "-q", "origin", "HEAD:main"], clone)
+    run(["git", "fetch", "-q", "origin"], clone)
+    write(clone, "templates/x.md", "an edited rule\n")
+    ok(refuses(), "derive refuses a checkout with an edited tracked file")
+    run(["git", "checkout", "-q", "--", "templates/x.md"], clone)
     run(["git"] + env + ["commit", "-q", "--allow-empty", "-m", "unpushed"], clone)
-    ok(refuses("ahead"), "derive refuses a checkout whose HEAD is not origin/main")
+    ok(refuses(), "derive refuses a checkout whose HEAD is not origin/main")
 
     shutil.rmtree(work, ignore_errors=True)
     if failed:

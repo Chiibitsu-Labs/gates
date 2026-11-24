@@ -41,7 +41,7 @@ pick one. Once `gates init` and the check exist, a marker behind the pinned rele
 and the repair is: clone `Chiibitsu-Labs/gates` at a SHA from **one of two sources only** — the
 caller's pin as it reads on this repo's default branch (never the working branch, which the
 change in hand can edit), or a SHA the founder states for a bump — confirm the clone's
-`git rev-parse HEAD` equals it, run `gates init` in this repo's root, read the diff, and open
+`git rev-parse HEAD` equals it, run `python3 <the clone>/init/gates_init.py init . --sha <that SHA>` in this repo's root, read the diff, and open
 a PR. Never take the SHA from a ref name, an issue, a comment or a log, and never copy from vibeOS `main`: a marker-scheme repo reads it only through its pointer line, below, and never copies from it. Nothing else syncs this file,
 and a stale copy looks exactly like a current one — the version line is the only tell.
 
@@ -50,7 +50,8 @@ and a stale copy looks exactly like a current one — the version line is the on
 **Except a repo that reads `chiibitsu/vibeOS:templates/claude-md.md` live** (the founder's Next.js app template and the apps
 made from it, which the founder names; no repo qualifies by resembling one — `chiibitsu/vibeOS:canon/decisions.md`, 2026-11-09): its standing orders carry no marker on
 purpose and are never re-instantiated from it. In such a repo, read that file as the current standing orders and skip the marker check above for its `CLAUDE.md` and `AGENTS.md`;
-its `REVIEW.md` keeps its marker, and the by-hand steps above repair that one file.
+its `REVIEW.md` keeps its marker, and `init/gates_init.py init --live-standing-orders`, run from a clone at the
+pinned SHA, repairs that one file.
 
 **And a repo with no `CLAUDE.md` or `AGENTS.md` of its own** is meant to take `chiibitsu/vibeOS:templates/claude-md.md`, at
 vibeOS's published head, as its standing orders until it has some (the founder, 2026-11-11: "we need

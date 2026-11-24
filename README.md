@@ -202,9 +202,14 @@ checklist).
 `chiibitsu/vibeOS:templates/claude-md.md`. `init/release/` holds a copy derived from vibeOS's templates by
 `gates_init.py derive <vibeOS checkout>`: fixed edits, each asserted to match, then shape
 checks over the result. No edit and no check spells out a private string: each finds its text
-by structure, and the founder's name is matched by digest. It leaves out the time-ledger section, the vault-memory gotcha, the
-founder's timezone and name, every `owner/repo` locator but `chiibitsu/vibeOS` and this
-org's public repos, and the deploy-after-merge section; it rewrites vibeOS paths as
+by structure, and the founder's name is matched by digest, which keeps its spelling out of
+the source (a short name's digest is guessable, so it hides the literal, not the name). It
+leaves out the time-ledger section, the vault-memory gotcha, the founder's timezone and name,
+the deploy-after-merge section, and every `owner/repo` locator the shape checks can see but
+`chiibitsu/vibeOS` and this org's public repos. `gates_init.py` lists exactly which shapes
+those checks match. They do not catch an unbackticked `acme/widget` in prose, a zone
+abbreviation, or any other person's or client's name, so reading the derived diff for those
+is part of every release; it rewrites vibeOS paths as
 `chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
 resolve; and it adds a pointer line to each file's region, which sends a session that can
 read vibeOS to that repo's rules. `init/release/PROTOCOL` declares the version and the vibeOS
@@ -368,21 +373,25 @@ In this order, in one sitting:
    `origin/main`, then `python3 init/gates_init.py derive <that checkout>`. It refuses a
    checkout with local changes or one not at `origin/main`, and it fails rather than guess
    when a template moved under one of its edits; fix the edit, never the check. It labels
-   the callers' pins with step 1's version. Read the diff
-   of `init/release/`, and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
+   the callers' pins with step 1's version. Read the diff of `init/release/` for anything the
+   shape checks cannot see (people's and clients' names, products), and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
 3. Run `./selftest.sh .` and `python3 init/gates_init.py --selftest`; merge; tag; add the row
    below.
 4. **Re-instantiate both template repos from the new tag in the same sitting** (vibeOS's
-   repo-bootstrap spec, Behavior C.3): run `init` in each from a checkout at the tag (the
-   Next.js app template with `--live-standing-orders`), read the diff, and open the PR.
+   repo-bootstrap spec, Behavior C.3): run `init` in each from a clone at the new release's
+   SHA, the one the founder states for the bump (the standing orders those repos carry allow
+   no other source: never a tag name), with `--live-standing-orders` for the Next.js app
+   template. Read the diff and open the PR.
    Announce the release only once both have merged: until then a repo created from a
    template is born behind. Every other repo moves when a session runs `init` from the new
    release; until then its pin, and so its check, is unchanged. "Red when stale" means
    stale against the pinned release, never against vibeOS's head.
-5. **Moving `caller-smoke.yml`'s pin** to a release that carries the standing-orders check
-   makes that check run over this repo, which has no standing orders of its own. That bump's
-   PR first gives this repo its standing orders with `init` (`--adopt` for its existing
-   `REVIEW.md`, which is this repo's reviewer bar, so the founder rules on it), or it is red.
+5. **Do not move `caller-smoke.yml`'s pin** to a release that carries the standing-orders
+   check until the founder rules how this repo meets it. Measured: that check then runs over
+   this repo, which has no `CLAUDE.md` or `AGENTS.md`, keeps its own `REVIEW.md` as this
+   repo's reviewer bar, and has no review caller (its `.github/workflows/review.yml` is the
+   reusable workflow itself, so `init` refuses to write one there). No session can make that
+   bump green alone; it is a design question, filed as one, not a step to improvise.
 
 ## Known gaps
 
