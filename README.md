@@ -230,8 +230,12 @@ body: a current marker on a stale body is a reviewer's finding. It reads the exp
 version from its own checkout, which in CI is the pinned release. **A pin bump across a
 protocol version is red on its own PR** (Renovate's included): the new release's check finds
 the old markers, and the fix is `init` from the new release at a SHA the founder states, in
-that same PR. `selftest.yml` does not run the check over this repo; `caller-smoke.yml` will,
-once its pin reaches a release that carries it (see the release checklist).
+that same PR. **One repo is exempt: this one** (the founder's ruling, 2026-11-24). The
+toolkit is not a repo instantiated from itself: it has no `CLAUDE.md` or `AGENTS.md`, its
+`REVIEW.md` is its own reviewer bar, and its `review.yml` is the reusable workflow, not a
+caller. `gates.yml` skips the check, and only the check, when `github.repository` is
+`Chiibitsu-Labs/gates`, and says so in the log (`EXEMPT [standing-orders]`) and as an
+annotation; the script's selftest still runs. A fork under another name is not exempt.
 
 **Every refusal and every red is named** in `REFUSALS` and `REDS` in the script. Its
 `--selftest` fails unless each one fired at least once during the run and the two lists
@@ -435,13 +439,11 @@ In this order, in one sitting:
    other repo moves when a session runs `init` from the new release; until then its pin, and
    so its check, is unchanged. "Red when stale" means stale against the pinned release,
    never against vibeOS's head.
-5. **Do not move `caller-smoke.yml`'s pin** to a release that carries the standing-orders
-   check until the founder rules how this repo meets it. Measured: that check then runs over
-   this repo, which has no `CLAUDE.md` or `AGENTS.md`, keeps its own `REVIEW.md` as this
-   repo's reviewer bar, and has no review caller (its `.github/workflows/review.yml` is the
-   reusable workflow itself, so `init` refuses to write one there). No session can make that
-   bump green alone; it is a design question for the founder, named in the pull request that
-   added this check and not yet filed anywhere else, not a step to improvise.
+5. **Move `caller-smoke.yml`'s pin** to the new release in a follow-up PR, as before. The
+   standing-orders check does not run over this repo: the founder ruled it exempt
+   (2026-11-24), and `gates.yml` says so on every run (see "Standing orders" above). On the
+   first bump to a release that carries the exemption, read the run's log for the
+   `EXEMPT [standing-orders]` line: the exemption has not run in CI until then.
 
 ## Known gaps
 

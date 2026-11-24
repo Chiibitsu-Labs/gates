@@ -79,7 +79,21 @@ jobs:
       # agree. Same rule as the gates above: its own --selftest runs first, and fails unless
       # every refusal and every red it names fired; then the check runs on the tree.
       - name: Standing orders match this release
+        env:
+          CALLER_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           python3 -I ./gates-toolkit/init/gates_init.py --selftest
-          python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
+          # THE ONE EXEMPTION, the founder's ruling of 2026-11-24: the toolkit's own repo.
+          # It is not a product repo: it has no CLAUDE.md or AGENTS.md, its REVIEW.md is its
+          # own reviewer bar, and its review.yml is the reusable workflow, not a caller, so
+          # init cannot instantiate it. CALLER_REPO is `github.repository`, which in a
+          # reusable workflow is the repo whose run this is (the caller's) and is set by
+          # GitHub, not by the caller, so no other repo reaches this branch. It says so out loud, in the log and as an
+          # annotation; the selftest above still ran.
+          if [ "$CALLER_REPO" = "Chiibitsu-Labs/gates" ]; then
+            echo "EXEMPT [standing-orders] Chiibitsu-Labs/gates is the toolkit itself, not a repo instantiated from it; the check did not run on this tree (founder's ruling, 2026-11-24)"
+            echo "::notice title=standing-orders check exempt::Chiibitsu-Labs/gates is the toolkit itself; the standing-orders check did not run on this tree."
+          else
+            python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
+          fi
