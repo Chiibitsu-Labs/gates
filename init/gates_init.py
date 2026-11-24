@@ -116,7 +116,7 @@ REFUSALS = (
 )
 REDS = (
     "missing-file", "unreadable-file", "odd-line-break", "missing-marker", "unreadable-marker",
-    "duplicate-marker", "behind", "ahead", "split",
+    "duplicate-marker", "region-unreadable", "marker-outside-region", "behind", "ahead", "split",
     "caller-noncanonical", "security-noncanonical", "pin-missing", "pin-unpaired", "pin-split",
 )
 FIRED = set()  # every refusal and red that actually happened in this process
@@ -394,6 +394,43 @@ def scan(text):
     return pins, bad, sec_bad, security
 
 
+WITH_LINE = re.compile(r" *with:(?:[ \t]+#.*)?")
+
+
+def unpaired(text, pins):
+    """Line numbers of gates.yml calls and gates_ref lines that are not paired one to one
+    inside the call's own job. Accept narrow: after the call's `uses:` line, and before any
+    line indented less than it (the job's end), a `with:` key at the same indent as `uses:`
+    holds exactly one accepted gates_ref line as its direct child. A gates_ref anywhere else
+    (another job, another key, above its `uses:`) belongs to no call."""
+    lines = text.split("\n")
+    indent = lambda l: len(l) - len(l.lstrip(" "))
+    refs = {n for n, k, _ in pins if k == "gates_ref"}
+    claims, bad = {}, set()
+    for n, k, _ in pins:
+        if k != "gates":
+            continue
+        at, mine, in_with, child = indent(lines[n - 1]), [], False, None
+        for j in range(n, len(lines)):
+            l = lines[j]
+            if not l.strip() or l.lstrip(" ").startswith("#"):
+                continue
+            ind = indent(l)
+            if ind < at:
+                break
+            if ind == at:
+                in_with, child = WITH_LINE.fullmatch(l) is not None, None
+            elif in_with:
+                child = ind if child is None else child
+                if ind == child and j + 1 in refs:
+                    mine.append(j + 1)
+        if len(mine) != 1:
+            bad.add(n)
+        for r in mine:
+            claims[r] = claims.get(r, 0) + 1
+    return sorted(bad | {r for r in refs if claims.get(r, 0) != 1})
+
+
 CANONICAL = ("`uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<40-hex SHA>` (or review.yml) "
              "and `gates_ref: <40-hex SHA>`, each alone on its line, unquoted, as init writes them")
 CANONICAL_SECURITY = ("`uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@<40-hex "
@@ -511,11 +548,13 @@ def plan(target, sha, today, history, release=RELEASE):
         if not pins:
             continue
         here = [k for _, k, _ in pins]
-        if here.count("gates") != here.count("gates_ref"):
+        loose = unpaired(doc.text, pins)
+        if loose:
             problems.append(str(refuse("pin-unpaired", (
-                "%s has %d gates.yml call(s) and %d gates_ref line(s) in init's form; each call "
-                "needs its own. Fix the caller by hand, then run init again.")
-                % (show(p), here.count("gates"), here.count("gates_ref")))))
+                "%s line %s: each gates.yml call needs exactly one gates_ref of its own, under "
+                "the `with:` of the same job, after its `uses:` line; a gates_ref anywhere else "
+                "reaches no call. Fix the caller by hand, then run init again.")
+                % (show(p), ", ".join(map(str, loose))))))
             reported.add(p)
             continue
         kinds.update(here)
@@ -744,6 +783,22 @@ def check(target, release=RELEASE):
                 "line by hand; init does not. Then see %s." % (path, n, vstr(rel), ptr))
             continue
         seen[path] = v
+        # A file with no region at all is a later slice's (init refuses it and says so); a
+        # file that has one must be a file init can still update, or a green here would
+        # certify a file the next init refuses.
+        try:
+            b_, e_ = parse_region(text, path)
+        except Problem as e:
+            b_ = None
+            if MARKER_KEY in text:
+                red(fails, "region-unreadable", "%s: expected one well-formed template-owned "
+                    "region, which init needs to update this file; found: %s Repair the region "
+                    "markers by hand; init does not. Then see %s." % (path, e, ptr))
+        if b_ is not None and not b_ < n - 1 < e_:
+            red(fails, "marker-outside-region", "%s:%d: expected the Protocol version marker "
+                "inside the template-owned region (lines %d to %d), found it outside, where init "
+                "refuses the file. Move or remove that line by hand; init does not. Then see %s."
+                % (path, n, b_ + 1, e_ + 1, ptr))
         found = ("%s:%d: expected %s, the version this toolkit checkout declares (in CI, the pinned "
                  "release); found %s, which is %%s it. See %s." % (path, n, vstr(rel), vstr(v), ptr))
         if v < rel:
@@ -769,11 +824,13 @@ def check(target, release=RELEASE):
                 "only in the form init writes (%s), found another form. Fix or remove the line "
                 "by hand; init does not repair a caller."
                 % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))
-        kinds = [k for _, k, _ in pins]
-        if kinds.count("gates") != kinds.count("gates_ref"):
-            red(fails, "pin-unpaired", "%s: expected one gates_ref for each gates.yml call, found "
-                "%d call(s) and %d gates_ref. Fix the caller by hand; init does not repair one."
-                % (show(p), kinds.count("gates"), kinds.count("gates_ref")))
+        loose = unpaired(text, pins)
+        if loose:
+            red(fails, "pin-unpaired", "%s line %s: expected each gates.yml call to have exactly "
+                "one gates_ref of its own, under the `with:` of the same job and after its "
+                "`uses:` line; found a call without one, or a gates_ref that reaches no call. "
+                "Fix the caller by hand; init does not repair one."
+                % (show(p), ", ".join(map(str, loose))))
         occ += [(show(p), k, s) for _, k, s in pins]
     lacking = [k for k in ("gates", "gates_ref", "review") if k not in {k for _, k, _ in occ}]
     if lacking:
@@ -793,9 +850,10 @@ def cmd_check(target):
     if fails:
         return 1
     print("ok [standing-orders] the CLAUDE.md, AGENTS.md and REVIEW.md markers are %s, the version "
-          "this toolkit checkout declares (in CI, the pinned release), and the gates, gates_ref and "
-          "review pins are in init's form and name one SHA. Markers and pins only, never the "
-          "bodies; this run does not compare the pin with its own checkout." % vstr(release_version()))
+          "this toolkit checkout declares (in CI, the pinned release), each inside its file's "
+          "template-owned region where the file has one, and the gates, gates_ref and review pins "
+          "are in init's form, name one SHA, and each gates call has its own gates_ref in its own "
+          "job. Markers, region markers and pins only, never the bodies; this run does not compare the pin with its own checkout." % vstr(release_version()))
     return 0
 
 
@@ -1001,7 +1059,8 @@ def derive_text(name, text, label):
         # on any other form.
         pins, bad, sec_bad, security = scan(text)
         want = {TIER1[1]: ["gates", "gates_ref"], REVIEWC[1]: ["review"], SECURITY[1]: []}[name]
-        if bad or sec_bad or [k for _, k, _ in pins] != want or security != (name == SECURITY[1]):
+        if (bad or sec_bad or [k for _, k, _ in pins] != want or unpaired(text, pins)
+                or security != (name == SECURITY[1])):
             raise refuse("derive-caller-form", "derive: templates/%s does not carry exactly %s in "
                          "the form init writes" % (name, " and ".join(want) or "one security call"))
         if name != SECURITY[1]:
@@ -1651,6 +1710,41 @@ def selftest():
     G = "    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s\n" % N
     for name, mutate, want in cases:
         ok(checked(mutate) == want, "the check is red for %s, and reports exactly %s" % (name, ", ".join(sorted(want))))
+    # What init refuses in a file that has a region, the check is red on: a green never
+    # certifies a file the next init cannot update.
+    def moved_out(t):
+        line = next(l for l in t.split("\n") if MARKER_LOOSE.search(l))
+        return t.replace(line + "\n", "", 1) + "\n" + line + "\n"
+    ref_line = "      gates_ref: " + N
+    drop_ref = lambda t: "\n".join(l for l in t.split("\n") if not l.startswith(ref_line))
+    def ref_elsewhere(t):  # the gates_ref leaves the gates job for a new job of its own
+        return drop_ref(t) + "  other:\n    with:\n" + ref_line + "\n"
+    def ref_other_key(t):  # same job, under another key
+        return t.replace("    with:\n" + ref_line, "    with:\n      x: 1\n    secrets:\n" + ref_line, 1)
+    def ref_above(t):  # same job, its `with:` above the `uses:` line
+        g = next(l for l in t.split("\n") if l.startswith(G.rstrip("\n")))
+        rl = next(l for l in t.split("\n") if l.startswith(ref_line))
+        return t.replace(g + "\n    with:\n" + rl + "\n", "    with:\n" + rl + "\n" + g + "\n", 1)
+    def ref_nested(t):  # under the right `with:`, one level too deep
+        return t.replace("    with:\n" + ref_line, "    with:\n      x:\n  " + ref_line, 1)
+    for name, path, f, code, site in (
+            ("the only marker moved below the region", "AGENTS.md", moved_out, "marker-outside-region", "marker-shape"),
+            ("a second region pair", "AGENTS.md", lambda t: t + "\n" + BEGIN + "\n" + END + "\n", "region-unreadable", "region-many"),
+            ("a gates_ref moved under another job", TIER1[0], ref_elsewhere, "pin-unpaired", "pin-unpaired"),
+            ("a gates_ref under another key of the gates job", TIER1[0], ref_other_key, "pin-unpaired", "pin-unpaired"),
+            ("a gates_ref above its uses line", TIER1[0], ref_above, "pin-unpaired", "pin-unpaired"),
+            ("a gates_ref nested one level too deep", TIER1[0], ref_nested, "pin-unpaired", "pin-unpaired")):
+        d = fresh("agree")
+        init(d)
+        before = raw(d, path)
+        write(d, path, f(before))
+        ok(raw(d, path) != before and {c_ for c_, _ in check(d)} == {code} and refused(d, site, at="N1"),
+           "the check is red (%s, and only that) for %s, which init refuses too (%s)" % (code, name, site))
+    d = fresh("agree-none")
+    init(d)
+    write(d, "AGENTS.md", "\n".join(l for l in raw(d, "AGENTS.md").split("\n") if l not in (BEGIN, END)))
+    ok(check(d) == [] and refused(d, "region-none"),
+       "the one stated exception: a file with no region at all is green in the check and refused by init, a later slice's")
     d = fresh("pointer")
     init(d)
     write(d, "REVIEW.md", raw(d, "REVIEW.md").replace("docs/02 " + relv, "docs/02 " + behind, 1))
@@ -1787,6 +1881,9 @@ def selftest():
     ok(fires("derive-edit-count", lambda: _sub("a b", "c", "d")), "a targeted edit that matches nothing stops the derivation")
     ok(fires("derive-edit-count", lambda: _sub("a a", "a", "d")), "a targeted edit that matches twice stops the derivation")
     ok(fires("derive-paragraph", lambda: _in_paragraph("x\n\ny", "**Missing lead**", [])), "an edit whose paragraph is gone stops the derivation")
+    ok(fires("derive-caller-form", lambda: derive_text(TIER1[1], "jobs:\n  gates:\n" + G + "  other:\n    with:\n" + Rf, label))
+       and not fires("derive-caller-form", lambda: derive_text(TIER1[1], "jobs:\n  gates:\n" + G + "    with:\n" + Rf, label)),
+       "derive refuses a tier1 template whose gates_ref sits under another job, and takes the same lines paired")
     ok(fires("derive-caller-form", lambda: derive_text(TIER1[1], G.replace("uses: ", 'uses: "').replace("\n", '"\n') + Rf, label)),
        "derive refuses a caller template whose pins are not in init's form")
     sec_t = read(os.path.join(RELEASE, SECURITY[1]))

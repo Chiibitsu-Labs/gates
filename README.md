@@ -181,6 +181,8 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   renderer may read it differently, and init does not guess. The same goes for the Protocol
   version line: at most one, readable, inside the region. One it cannot read, a second one,
   or one outside the region is refused, and a rewritten file keeps its permission bits.
+  The check is red on the same things in a file that has a region: a region init cannot
+  read, or a marker outside it. A file with no region at all is the one exception, below.
 - **A file with no region is not adopted, and a repo that reads the standing orders live is
   not handled.** Both are refused with a message. Adoption and the live-read case are a
   later slice's (the founder's ruling on this pull request; vibeOS repo-bootstrap spec, open
@@ -193,7 +195,10 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   any trailing comment. A quoted or spaced key, a flow mapping, a tag or branch pin, another
   letter case, a lookalike owner, a commented-out call, or a `gates_ref` key behind an
   anchor or a tag is detected, not accepted, and stops the run: fix the line by hand first,
-  keeping the commit it names. A gates call without its own `gates_ref` stops the run too.
+  keeping the commit it names. Each gates call needs exactly one `gates_ref` of its own:
+  a direct child of a `with:` key in the same job, below its `uses:` line. A call without
+  one, or a `gates_ref` anywhere else (another job, another key, above the `uses:` line),
+  stops the run and is red in the check.
   The security caller is read the same way.
 - **When a pin moves:** to the SHA of the checkout init runs from, and only forward. An
   accepted pin moves only if that checkout's history contains it; a newer or unknown pin, or
