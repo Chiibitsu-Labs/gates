@@ -31,3 +31,8 @@ jobs:
           lfs: true
       - name: Prove every gate can fail, then run it on this tree
         run: ./selftest.sh .
+      # gates init and the standing-orders check prove themselves here. The check itself does
+      # not run over this tree: the toolkit is the source of the copy, not a repo that
+      # instantiates it, and it carries no CLAUDE.md or AGENTS.md of its own.
+      - name: gates init and the standing-orders check prove every case
+        run: python3 init/gates_init.py --selftest

@@ -1,0 +1,34 @@
+# Security — the caller. Drop at .github/workflows/security.yml, beside tier1.yml.
+#
+# This is the repo's own security check: vibeOS docs/04 "Who merges" condition 5. A repo
+# without one has every PR merged by the founder, never unattended.
+#
+# BEFORE YOU COMMIT THIS FILE:
+#   1. Replace the SHA with Chiibitsu-Labs/security-checks' current main, read with
+#      `git ls-remote https://github.com/Chiibitsu-Labs/security-checks main` — never from
+#      another repo's copy of this file.
+#   2. codeql: true only if the repo is PUBLIC (a private repo needs GitHub Advanced Security).
+#   3. Mark this workflow's jobs required in branch protection, the same way tier1.yml's step 5
+#      says: open a first PR and read the exact check names off it.
+name: security
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+jobs:
+  security:
+    # Pin a SHA, never a branch. Keep the `# main` hint: Renovate needs it to know what to bump.
+    uses: Chiibitsu-Labs/security-checks/.github/workflows/security.yml@a3c929cc1afcf608cb443927eaca1071ae518a82 # main
+    with:
+      # The gates toolkit scans the working tree only; gitleaks also scans the PR's commits.
+      gitleaks: true
+      codeql: false # true for public repos only
+      npm-audit: true # false only in a repo with no package.json; the secrets job fails if one appears
+      semgrep: true # code scan, about a minute per run

@@ -26,6 +26,14 @@ on:
           exists to refuse.
         required: true
         type: string
+      standing_orders_live:
+        description: >-
+          true only in a repo whose CLAUDE.md and AGENTS.md read vibeOS's template live and
+          carry no marker on purpose (vibeOS canon/decisions.md, 2026-11-09): the version check
+          then skips those two files. Its REVIEW.md is checked either way.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -73,3 +81,18 @@ jobs:
 
       - name: Prove every gate can fail, then run it on this tree
         run: ./gates-toolkit/selftest.sh "$GITHUB_WORKSPACE/repo"
+
+      # The standing-orders version check: CLAUDE.md, AGENTS.md and REVIEW.md carry the
+      # protocol version this release declares, and the gates pins agree. Same rule as the
+      # gates above: its own --selftest proves every red case first, then it runs on the tree.
+      - name: Standing orders match this release
+        env:
+          LIVE: ${{ inputs.standing_orders_live }}
+        run: |
+          set -euo pipefail
+          python3 ./gates-toolkit/init/gates_init.py --selftest
+          if [ "$LIVE" = true ]; then
+            python3 ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo" --live-standing-orders
+          else
+            python3 ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
+          fi

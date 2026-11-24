@@ -17,6 +17,11 @@ scripts/check_references.py
 # gates/MANIFEST.txt exists to remove one directory over.
 scripts/gates/service-role-terms.txt
 
+# Cited by init/release/claude-md.md, the standing-orders copy `gates init` writes into
+# OTHER repos as their CLAUDE.md: it names the consuming repo's own spec directory, outside
+# the template-owned region, for that repo to fill. This toolkit has no specs and never will.
+product/specs/
+
 # Cited ONLY by fixtures/check_references/bad/README.md, which is a planted failure
 # whose entire purpose is to be a broken citation. Allowed here so check_references.py
 # can pass this repo's own tree; NOT allowed inside the fixture, which has no allowlist

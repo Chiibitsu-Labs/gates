@@ -135,6 +135,70 @@ trees must make the gate go red **with** an UNKNOWN line and **without** a FAIL 
 requiring the red would be satisfied by a gate that invented a violation instead — which
 sends someone hunting for a bug in their code rather than a blind spot in the gate.
 
+## Standing orders: `gates init` and the version check
+
+`init/gates_init.py` writes a repo's standing orders and keeps them at the protocol version
+this release carries (vibeOS's repo-bootstrap spec, slice 2). It owns exactly six files:
+`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
+`security.yml` in the repo's workflows directory. It never touches a `.gitignore`, a hook, a README or a
+board, and it never commits or pushes.
+
+```sh
+git clone https://github.com/Chiibitsu-Labs/gates && git -C gates checkout <sha>
+git -C gates rev-parse HEAD                       # must print <sha>
+python3 gates/init/gates_init.py init /path/to/repo --sha <sha>
+```
+
+**Which SHA, and which code runs.** The script is chosen by the checkout you are about to
+trust, so the SHA comes from one of two places only: the Tier 1 caller's `gates_ref` as it
+reads on the repo's **default branch** (never the working branch, which the change in hand
+can edit), or a SHA the founder states for a bump. Confirm `git rev-parse HEAD` before
+running. init refuses to run unless `--sha` equals its own checkout's `HEAD` and that
+checkout is clean, which catches a wrong clone; it cannot vouch for itself, so the
+`rev-parse` you ran is the check that counts.
+
+- **Standing-orders files** carry one template-owned region between
+  `<!-- gates:template-owned:begin -->` and `<!-- gates:template-owned:end -->`. init
+  rewrites the region and keeps every byte outside it. A file with no region, more than one
+  marker of either kind, the end before the begin, a marker in a fenced block, or a marker
+  not alone on its line is reported and left untouched.
+- **Adopting a file with no region** (`--adopt`, once): for a file with no marker at all,
+  init inserts the region after the first heading and keeps every existing line. The stale
+  template text still sitting outside it is not guessed at: it shows in the diff, and the
+  same PR deletes it by hand.
+- **When a pin moves:** to the SHA of the checkout init runs from, and only forward. An
+  existing pin moves only if that checkout's history contains it; a newer pin, an unknown
+  one, or a marker ahead of this release stops the run with nothing written. So running an
+  older release over a newer pin changes nothing.
+- **Callers that already exist:** only their gates pins move; their bodies are the repo's
+  (the `project:` job is meant to be edited) and init says so, naming the release copy to
+  compare against. A one-file caller in this repo's `caller-template.yml` shape is found
+  and moved; no second caller is added beside it. The **security caller** is written only
+  when the repo has none and init never rewrites its pin: its `# main` hint is for Renovate.
+- **All or nothing:** any problem in any file stops the run before the first write.
+- **A repo that reads the standing orders live** (`--live-standing-orders`) gets no
+  `CLAUDE.md` or `AGENTS.md` region; its `REVIEW.md` is handled as usual.
+
+**The check** runs in `gates.yml` after the gates, as `check` with the same proof-first rule:
+its `--selftest` runs every red case before it looks at your tree. It is red, with expected,
+found and the paragraph to read, for a missing file among the three, a missing or duplicated
+marker, a marker behind or ahead of the release, the three files split between versions, a
+missing pin, or the gates-SHA occurrences disagreeing. It asserts the markers and the pin,
+never the body: a current marker on a stale body is a reviewer's finding. Set the
+`standing_orders_live: true` input in a repo that reads the standing orders live. This
+repo's own tree is not checked: it is the copy's source, not a repo that instantiates it.
+
+**The team-safe copy.** This repository is public, so it never carries vibeOS's own
+`chiibitsu/vibeOS:templates/claude-md.md`. `init/release/` holds a copy derived from vibeOS's templates by
+`gates_init.py derive <vibeOS checkout>`: fixed edits, each asserted to match, then shape
+checks over the result. It leaves out the time-ledger section, the vault-memory gotcha, the
+founder's timezone and name, every `owner/repo` locator but `chiibitsu/vibeOS` and this
+org's public repos, and the deploy-after-merge section; it rewrites vibeOS paths as
+`chiibitsu/vibeOS:<path>` locators, which a consuming repo's reference gate does not try to
+resolve; and it adds a pointer line to each file's region, which sends a session that can
+read vibeOS to that repo's rules. `init/release/PROTOCOL` declares the version and the vibeOS
+commit it came from.
+
 ## How to call it
 
 This snippet carries `<sha-from-the-releases-table>` rather than a real hash, and that is the
@@ -282,6 +346,24 @@ A release's `CITATION.cff` names its own version — that is the part that must 
 | v1.0.2 | `c3e3f49` | **Usable, and superseded by v1.0.4** — same gates, wrong version metadata inside the tag. Everything six review rounds found in v1.0.0 and v1.0.1 is fixed here, each fix carrying the minimal fixture that proves the shape is still caught. It has **one known false green**, reproducible: `steps: [{uses: a/b@main}, {uses: c/d@v1}]` reports ok. The rule that produces it is stated once, in Known gaps below, and deliberately not paraphrased here — a first draft of this row paraphrased it and got the rule wrong in a different way than the gap section did, which is how two statements of one fact always end. Treat this release as a first line, never as the only one. An earlier draft of this row claimed no known false green while the gap below already described one — the claim was wrong, and it is corrected here rather than quietly dropped. |
 | v1.0.1 | `45834a1` | **Yes**, with one known false red. A workflow line like `uses: owner/repo@<40 hex> # docker://anything` is rejected as an unpinned container action, because this version tests the whole line for `docker://` instead of the parsed value. It errs toward a visible red, never a silent green, which is why the tag stands rather than moving. Fixed after the tag point. Review since then also found six more defects in the two gates rewritten at that tag point — including two outright false greens, and a denylist that made *any* repo with a non-empty one permanently red. All fixed after the tag; the fixes shipped in v1.0.2. Superseded — move to v1.0.4. |
 | v1.0.0 | `39f78d6` | **No.** Four gates could pass a violation: migrations-lint read a commented-out `enable row level security` as evidence; actions-sha-pinned missed two legal YAML spellings of the `uses` key; required-files and nextjs-env skipped every git-backed check inside a linked worktree or submodule. It also deleted a `.gates-selftest` directory in the tree it was inspecting. The tag stays where it is — a published tag on a gate toolkit does not get moved — and this table is the record. |
+
+### Cutting a release
+
+In this order, in one sitting:
+
+1. Set `CITATION.cff`'s `version` to the new release, before anything is tagged (the v1.0.3 row
+   says why).
+2. **Re-derive the team-safe copy** from vibeOS's published head:
+   `python3 init/gates_init.py derive <vibeOS checkout at main>`. It fails rather than guess
+   when a template moved under one of its edits; fix the edit, never the check. Read the diff
+   of `init/release/`, and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
+3. Run `./selftest.sh .` and `python3 init/gates_init.py --selftest`; merge; tag; add the row
+   below.
+4. **Re-instantiate both template repos from the new tag in the same sitting** (vibeOS's
+   repo-bootstrap spec, Behavior C.3): run `init` in each from a checkout at the tag, read
+   the diff, open the PR, so a repo created after a bump is never born behind. Every other
+   repo moves when a session runs `init` from the new release; until then its pin, and so
+   its check, is unchanged.
 
 ## Known gaps
 
