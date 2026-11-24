@@ -1,0 +1,110 @@
+# Written by `gates init`: the toolkit SHAs in this file are already set to the release
+# init ran from. Wherever the header below says to replace or bump them by hand, or to
+# take a SHA from the toolkit's Releases table, THIS NOTE SUPERSEDES IT: they move only
+# by running init from a newer release, at a SHA from one of the two sources the
+# Protocol version paragraph in CLAUDE.md names, and from nowhere else.
+# Draft-stage review (docs/04 Tier 2) — the caller. Drop at .github/workflows/review.yml.
+#
+# SEPARATE FILE, AND THE REASON IS NOT THE ONE YOU MIGHT GUESS. Every job produces its own
+# check run, so a review job inside tier1-ci.yml would NOT be silently required — you would
+# simply leave it unmarked. What it WOULD do is set the `Tier 1` WORKFLOW's conclusion to
+# failure, and docs/04's auto-merge condition 1 is "Tier 1 is green", which a session reads
+# off the workflow. An exhausted review quota would then read as the deterministic gates
+# having failed on a diff they passed. Separate file, separate workflow conclusion, separate
+# concurrency group, separate blast radius when a vendor is down.
+#
+# A model reviewer is never a required check (docs/04: "clean" is a property of a run, not
+# of a commit). The toolkit's own review.yml opens with the same sentence: "It is Tier 2 and
+# it is NOT a gate... nothing here should ever be a required check."
+#
+# DO NOT mark this job's check run required in branch protection.
+#
+# BEFORE YOU COMMIT THIS FILE:
+#   1. Replace the pinned SHA on the `uses:` line with the release you want, from the
+#      toolkit's Releases table and never from another repo's copy. ONE SHA here, not two:
+#      review.yml's `workflow_call` takes a secret and no inputs, so there is no `gates_ref`
+#      to hand it — unlike the gates caller, which needs both. Bump it in the same commit as
+#      the gates caller's pair; a split pin runs one release's reviewer beside another
+#      release's gates.
+#   2. Put a REVIEW.md at your repo root. The reviewer loads it from the BASE revision — so
+#      a PR cannot rewrite the bar it is judged by — and reports UNKNOWN and exits 1 when
+#      it is missing. Without the file every draft PR is red.
+#   3. Set the CLAUDE_CODE_OAUTH_TOKEN repository secret (`claude setup-token`). Without it
+#      the job fails loudly rather than reviewing nothing.
+#   4. Check which vendor implements in this repo. This file wires a Claude draft reviewer,
+#      which is right only where Claude is the builder — docs/06's PR-gate reviewer row says
+#      what an OpenAI-implemented repo wires instead. That is one action, and the finisher is
+#      a second one this file cannot wire: docs/04's PR review gate section is where the
+#      finisher's independence is argued.
+#
+# REVIEW.md IS THIS REVIEWER'S ONLY POLICY SOURCE — its prompt names that file and the diff
+# and nothing else. Whether the action's checkout also auto-loads a CLAUDE.md from the PR
+# head is NOT measured; do not assume the head tree cannot reach the reviewer. A lens absent from it is a lens nobody runs, the security one
+# included. docs/04 Tier 2 lists what the file holds.
+
+name: Draft review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs only while the PR is a draft; on a ready PR the job reports `skipped`, which is an
+  # absence, not a pass.
+  #
+  # THE GUARD IS REPEATED HERE ON PURPOSE. review.yml guards its own inner job, and a
+  # skipped inner job reports SUCCESS to the caller — reasoned from GitHub's documented
+  # reusable-workflow semantics and NOT measured here, the same standing the toolkit gives
+  # its own trigger claims — so without this line a ready PR produces a green check with no
+  # reviewer behind it. Guarded here, the caller's own result is `skipped`, which reads as
+  # what it is.
+  #
+  # THE FORK HALF IS NOT DECORATION. A pull request from a fork cannot be handed the
+  # CLAUDE_CODE_OAUTH_TOKEN, so without this the job would fail on every outside
+  # contribution rather than review it. Skipping is the honest outcome — and, exactly as
+  # with a ready PR, `skipped` is an ABSENCE and is not a pass. Know what it costs: a fork
+  # PR gets no BOUND draft round at all. That is the population where an outside author most
+  # needs a first look, and this job cannot give them one — so docs/04 Tier 2 makes the
+  # IN-SESSION round the local requirement on a fork PR: a fork PR that has had no round has
+  # not met it, and must not be flipped. Read the diff by fetching the PR ref into a clone of
+  # the trusted revision; never check the fork head out under an agent harness.
+  #
+  # TEST THE TWO REPOSITORIES, NEVER `head.repo.fork`. That flag says the head repository
+  # is itself a fork of something — a property of the repo, not of this pull request. This
+  # repo's own README opens with "Fork this repo" as step 1 of day one, so the repos most
+  # likely to run this file carry the flag permanently, and `head.repo.fork == false` would
+  # skip EVERY draft review in them, including ordinary branch-to-branch PRs by the owner.
+  # Silently: a skipped job reports success to the caller, which is the absence-reading-as-a-
+  # pass failure this same block warns about above. What decides whether the secret can be
+  # handed over is whether the head is a DIFFERENT repository from the base, so compare the
+  # two identities and never the flag. (Codex finisher, P1, 2026-09-15.)
+  #
+  # THE DELETED-HEAD-REPO CASE IS UNCHECKED. A deleted fork is reported to leave `head.repo`
+  # null; whether a property access on that null then skips this job or errors the workflow
+  # was not established. Both are safe directions; neither is verified. Do not build on it.
+  #
+  # AND THIS GUARD IS ONLY HALF THE FIX: the called workflow still tests `head.repo.fork` on
+  # its own job at the pinned release, so fixing this one does not make the review run.
+  # docs/04 Tier 2 owns the mechanism and which round becomes mandatory because of it;
+  # `ops/canon-pending.md` tracks the toolkit fix.
+  #
+  # Permissions are the caller's to grant: a called workflow can only narrow the token it
+  # is handed, so review.yml's own block is a ceiling, not a grant.
+  review:
+    if: >-
+      github.event.pull_request.draft == true
+      && github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.2.2
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

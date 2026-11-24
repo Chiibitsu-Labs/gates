@@ -73,3 +73,13 @@ jobs:
 
       - name: Prove every gate can fail, then run it on this tree
         run: ./gates-toolkit/selftest.sh "$GITHUB_WORKSPACE/repo"
+
+      # The standing-orders version check: CLAUDE.md, AGENTS.md and REVIEW.md carry the
+      # protocol version this release declares, and the gates pins are in init's form and
+      # agree. Same rule as the gates above: its own --selftest runs first, and fails unless
+      # every refusal and every red it names fired; then the check runs on the tree.
+      - name: Standing orders match this release
+        run: |
+          set -euo pipefail
+          python3 -I ./gates-toolkit/init/gates_init.py --selftest
+          python3 -I ./gates-toolkit/init/gates_init.py check "$GITHUB_WORKSPACE/repo"
