@@ -117,7 +117,8 @@ REFUSALS = (
 REDS = (
     "missing-file", "unreadable-file", "odd-line-break", "missing-marker", "unreadable-marker",
     "duplicate-marker", "region-unreadable", "marker-outside-region", "behind", "ahead", "split",
-    "caller-noncanonical", "security-noncanonical", "pin-missing", "pin-unpaired", "pin-split",
+    "caller-noncanonical", "security-noncanonical", "caller-unreadable", "pin-missing", "pin-unpaired",
+    "pin-split",
 )
 FIRED = set()  # every refusal and red that actually happened in this process
 
@@ -786,14 +787,16 @@ def check(target, release=RELEASE):
         # A file with no region at all is a later slice's (init refuses it and says so); a
         # file that has one must be a file init can still update, or a green here would
         # certify a file the next init refuses.
-        try:
-            b_, e_ = parse_region(text, path)
-        except Problem as e:
-            b_ = None
-            if MARKER_KEY in text:
-                red(fails, "region-unreadable", "%s: expected one well-formed template-owned "
-                    "region, which init needs to update this file; found: %s Repair the region "
-                    "markers by hand; init does not. Then see %s." % (path, e, ptr))
+        # It is read here the way init reads it (guard, load, parse_region), so the two
+        # cannot disagree about such a file.
+        b_ = None
+        if MARKER_KEY in text:
+            try:
+                b_, e_ = parse_region(load(guard(target, path), path).text, path)
+            except Problem as e:
+                red(fails, "region-unreadable", "%s: expected a file with one well-formed "
+                    "template-owned region that init can update; init refuses this one: %s "
+                    "Repair it by hand; init does not. Then see %s." % (path, e, ptr))
         if b_ is not None and not b_ < n - 1 < e_:
             red(fails, "marker-outside-region", "%s:%d: expected the Protocol version marker "
                 "inside the template-owned region (lines %d to %d), found it outside, where init "
@@ -824,6 +827,12 @@ def check(target, release=RELEASE):
                 "only in the form init writes (%s), found another form. Fix or remove the line "
                 "by hand; init does not repair a caller."
                 % (show(p), ", ".join(map(str, sec_bad)), CANONICAL_SECURITY))
+        if pins:
+            try:  # read the way init reads it, so a green caller is one init can move
+                load(guard(target, p), p)
+            except Problem as e:
+                red(fails, "caller-unreadable", "%s: expected a caller init can read and move; "
+                    "init refuses this one: %s Repair it by hand; init does not." % (show(p), e))
         loose = unpaired(text, pins)
         if loose:
             red(fails, "pin-unpaired", "%s line %s: expected each gates.yml call to have exactly "
@@ -1739,6 +1748,29 @@ def selftest():
         before = raw(d, path)
         write(d, path, f(before))
         ok(raw(d, path) != before and {c_ for c_, _ in check(d)} == {code} and refused(d, site, at="N1"),
+           "the check is red (%s, and only that) for %s, which init refuses too (%s)" % (code, name, site))
+    def rawbytes(d, path, f):
+        full = os.path.join(d, path)
+        with open(full, encoding="utf-8", newline="") as fh:
+            t = fh.read()
+        with open(full, "w", encoding="utf-8", newline="") as fh:
+            fh.write(f(t))
+    def linked(d, path):
+        full = os.path.join(d, path)
+        os.rename(full, full + ".real")
+        os.symlink(os.path.basename(full) + ".real", full)
+    crlf3 = lambda t: t.replace("\n", "\r\n", 3)
+    for name, path, mutate, code, site in (
+            ("mixed line endings in a file with a region", "AGENTS.md", lambda d: rawbytes(d, "AGENTS.md", crlf3), "region-unreadable", "mixed-eol"),
+            ("a begin marker behind two byte-order marks", "AGENTS.md", lambda d: rawbytes(d, "AGENTS.md", lambda t: "\ufeff\ufeff" + t[t.index(BEGIN):]), "region-unreadable", "region-not-col0"),
+            ("a file with a region that is a symlink", "AGENTS.md", lambda d: linked(d, "AGENTS.md"), "region-unreadable", "symlink"),
+            ("mixed line endings in a caller", TIER1[0], lambda d: rawbytes(d, TIER1[0], crlf3), "caller-unreadable", "mixed-eol"),
+            ("a caller that is a symlink", REVIEWC[0], lambda d: linked(d, REVIEWC[0]), "caller-unreadable", "symlink"),
+            ("two gates_refs under one with", TIER1[0], lambda d: write(d, TIER1[0], raw(d, TIER1[0]).replace(ref_line, ref_line + "\n" + ref_line, 1)), "pin-unpaired", "pin-unpaired")):
+        d = fresh("agree-read")
+        init(d)
+        mutate(d)
+        ok({c_ for c_, _ in check(d)} == {code} and refused(d, site, at="N1"),
            "the check is red (%s, and only that) for %s, which init refuses too (%s)" % (code, name, site))
     d = fresh("agree-none")
     init(d)
