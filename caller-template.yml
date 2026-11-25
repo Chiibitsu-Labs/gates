@@ -6,7 +6,7 @@
 # READ THIS BEFORE COPYING: the SHA shipped below is v1.3.0, set by hand after that release
 # was tagged (2026-11-25), and the Releases table in the README is what says whether it is
 # still the one to use. This file once shipped v1.2.0, which the table marks **do not use**,
-# for two releases running; a pin in a file nobody re-reads goes stale silently, so check the
+# through three tags (v1.2.1, v1.2.2 and v1.3.0); a pin in a file nobody re-reads goes stale silently, so check the
 # table every time.
 #
 # v1.3.0 ADDS THE STANDING-ORDERS CHECK, so a repo that copies this file is red until
@@ -15,12 +15,12 @@
 # "Standing orders"). This file is for a repo that wires a caller by hand.
 #
 # It does NOT name the release you are reading, and cannot: a commit cannot contain its own
-# SHA. What it does name is not derivable — from v1.0.2 onward it is the previous release, but
-# v1.0.0 and v1.0.1 pinned untagged ancestors, and v1.0.1 labelled its untagged pin with its
-# own version number. So take the SHA you want from the Releases table in the README, never
-# from this line. The one below is the PREVIOUS release, and that sentence has been wrong here
-# once already — it named v1.0.3 while the line beneath it said v1.0.4 — which is why it now
-# describes the relationship rather than restating the version.
+# SHA. What it does name is not derivable, and has been each of these: an untagged ancestor
+# (v1.0.0, v1.0.1, the second labelled with its own version number), the previous release,
+# and a release two and three behind (v1.2.2 and v1.3.0 both shipped v1.2.0's). Since v1.3.0
+# the pin is moved by hand after each tag (README, "Cutting a release", step 5), so between
+# releases it names the latest one and inside a tagged release it names the one before. So
+# take the SHA you want from the Releases table in the README, never from this line.
 on: [pull_request, push]
 jobs:
   gates:
