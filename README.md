@@ -288,9 +288,9 @@ instructions.
 on: [pull_request, push]
 jobs:
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<sha-from-the-releases-table>  # v1.2.2
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@<sha-from-the-releases-table>  # v1.3.0
     with:
-      gates_ref: <sha-from-the-releases-table> # v1.2.2
+      gates_ref: <sha-from-the-releases-table> # v1.3.0
 
   # The draft-stage reviewer. Needs a repository secret CLAUDE_CODE_OAUTH_TOKEN, and the
   # permissions block because a called workflow can only narrow the caller's token, never
@@ -301,7 +301,7 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@<sha-from-the-releases-table> # v1.2.2
+    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@<sha-from-the-releases-table> # v1.3.0
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -389,7 +389,7 @@ Five live in the repo being checked. The sixth belongs to the template, not here
 
 ## Releases
 
-The Commit column names a **tag** for the current release and a SHA for superseded ones, and that asymmetry is forced: the table lives in the commit being tagged, so it cannot contain that commit's own hash. Resolve the tag — `git rev-list -n1 v1.2.2` — and pin the SHA you get. Pin a SHA, never a tag: a tag is a movable name, and this table exists because names have been wrong here before.
+The Commit column names a **tag** for the current release and a SHA for superseded ones, and that asymmetry is forced: the table lives in the commit being tagged, so it cannot contain that commit's own hash. Resolve the tag — `git rev-list -n1 v1.3.0` — and pin the SHA you get. Pin a SHA, never a tag: a tag is a movable name, and this table exists because names have been wrong here before.
 
 That rule applies to everything this repo pins, not only to itself, and the reviewer's action is the measured case. On 2026-09-08, `anthropics/claude-code-action` resolved as:
 
@@ -404,7 +404,8 @@ A release's `CITATION.cff` names its own version — that is the part that must 
 
 | Version | Commit | Use it? |
 |---|---|---|
-| **v1.2.2** | tag `v1.2.2` — resolve with `git rev-list -n1 v1.2.2`, or read it off the release page | **Yes — use this one.** The toolkit moved to `Chiibitsu-Labs/gates`; the workflow checks itself out under the new name, and every caller should name it there, because GitHub Actions does not follow a transfer redirect for `uses:`. Removes the unreleased `npm-audit` gate: dependency audit lives in `Chiibitsu-Labs/security-checks`, one home for security. Gates otherwise identical to v1.2.1. |
+| **v1.3.0** | tag `v1.3.0` — resolve with `git rev-list -n1 v1.3.0`, or read it off the release page | **Yes — use this one.** Adds `gates init`, the team-safe copy of the standing orders in `init/release/` (protocol v8.2), and a new Tier 1 step, the standing-orders check, red when a repo's `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` marker or its toolkit pins fall behind or run ahead of the release it pins. The gates under `gates/` and the reviewer are unchanged from v1.2.2. **Adopting it turns a repo red until `init` has run in it from this release**, in the same PR as the pin bump; a repo whose standing-orders files have no template-owned region, or that reads them live, cannot adopt it yet and stays on v1.2.2 (see "Standing orders"). This repo itself is exempt from that one check, and says so on every run. |
+| v1.2.2 | `4d8a87e` | **Usable, and superseded by v1.3.0** — same gates, no `gates init` and no standing-orders check; the release for a repo that cannot adopt v1.3.0 yet. The toolkit moved to `Chiibitsu-Labs/gates`; the workflow checks itself out under the new name, and every caller should name it there, because GitHub Actions does not follow a transfer redirect for `uses:`. Removes the unreleased `npm-audit` gate: dependency audit lives in `Chiibitsu-Labs/security-checks`, one home for security. Gates otherwise identical to v1.2.1. |
 | v1.2.1 | `a0437c5` | **Usable, and superseded by v1.2.2** — same gates and reviewer. Its workflow checks the toolkit out as `chiibitsu/gates`, the name before the move to the Chiibitsu-Labs org. Fixes three defects in `service-role.sh` that v1.1.0 and v1.2.0 both shipped, each reproduced before the fix and each carrying a fixture: an ordinary circular import **did not terminate** (a hang, which reports nothing at all); one file reached by two spellings was counted twice, printing two findings each claiming "1 request-path module(s)"; and a multi-line `await import(` was a **false green** — `ok`, exit 0, over a page reaching `SUPABASE_SERVICE_ROLE_KEY`. Also fixes a concurrency key in `review.yml` that collapsed on non-PR events. Carries v1.0.2's known false green in `actions-sha-pinned.sh`, described below. |
 | v1.2.0 | `44f6125` | **Do not use.** Its `service-role.sh` is byte-identical to v1.1.0's and carries all three defects listed under v1.2.1 — including a false green on a multi-line dynamic import and a walk that does not terminate on a circular one. The reviewer it adds is sound; the gate underneath it is not. Move to v1.2.1. |
 | v1.1.0 | `7832ea6` | **Do not use** — same three `service-role.sh` defects as v1.2.0, described in the v1.2.1 row. Six gates, no reviewer. Added `service-role.sh`, the UNKNOWN outcome, and `gates/MANIFEST.txt` with a both-directions check against the `gates/` directory. Adopting it can turn a consumer red on code that was green under v1.0.4, because `service-role.sh` did not exist to check it; that is a finding, not a regression. |
