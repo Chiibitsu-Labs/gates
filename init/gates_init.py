@@ -605,14 +605,15 @@ def plan(target, sha, today, history, release=RELEASE):
         notes.append("note    %s carries the pin this release was cut with; its header's step 1 "
                      "(read the current SHA with git ls-remote) is still yours to do." % SECURITY[0])
 
-    if attempt(guard, target, MANIFEST) is not None:
-        if os.path.exists(os.path.join(target, MANIFEST)):
-            notes.append("same    %s is this repo's own; init never edits it" % MANIFEST)
-        else:
-            planned = {w[0] for w in writes}
-            paths = [p for p, _ in STANDING] + [p for p in (TIER1[0], REVIEWC[0], SECURITY[0])
-                                                if p in planned or p in docs]
-            writes.append((MANIFEST, MANIFEST_HEAD + "\n".join(paths) + "\n", "wrote"))
+    # A manifest the repo has is not init's to write, so it is not guarded either: however
+    # the repo keeps it (behind a link, say), init leaves it and goes on.
+    if os.path.exists(os.path.join(target, MANIFEST)):
+        notes.append("same    %s is this repo's own; init never edits it" % MANIFEST)
+    elif attempt(guard, target, MANIFEST) is not None:
+        planned = {w[0] for w in writes}
+        paths = [p for p, _ in STANDING] + [p for p in (TIER1[0], REVIEWC[0], SECURITY[0])
+                                            if p in planned or p in docs]
+        writes.append((MANIFEST, MANIFEST_HEAD + "\n".join(paths) + "\n", "wrote"))
 
     if problems:
         raise gathered(problems)
@@ -1375,6 +1376,17 @@ def selftest():
     ok([l for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")] == [p for p, _ in STANDING] + [SECURITY[0]]
        and all(os.path.exists(os.path.join(o, l)) for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")),
        "in a repo whose callers live in one file of its own, the manifest names only paths that exist after the run")
+    w = fresh("manifest-own-security")
+    write(w, SECURITY[0], "name: mine\non: push\njobs: {}\n")
+    init(w)
+    ok([l for l in raw(w, MANIFEST).split("\n") if l and not l.startswith("#")] == six,
+       "a security.yml of the repo's own, which init does not write, is still listed: the manifest names what is there after the run")
+    v = fresh("manifest-behind-link")
+    write(v, "tools/gates/required-files.txt", "README.md\n")
+    os.symlink("tools", os.path.join(v, "scripts"))
+    init(v)
+    ok(raw(v, "tools/gates/required-files.txt") == "README.md\n" and os.path.exists(os.path.join(v, "CLAUDE.md")),
+       "a manifest the repo keeps behind a symlink is left alone and does not stop the run: init guards only what it writes")
     k = fresh("manifest-link")
     os.makedirs(os.path.join(k, "elsewhere"))
     os.symlink("elsewhere", os.path.join(k, "scripts"))

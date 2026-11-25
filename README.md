@@ -141,7 +141,8 @@ sends someone hunting for a bug in their code rather than a blind spot in the ga
 this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes six files:
 `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
 `security.yml` in the repo's workflows directory. Where the repo has no
-`scripts/gates/required-files.txt`, it writes that too, listing those files: the
+`scripts/gates/required-files.txt`, it writes that too, listing the three standing-orders files and each of
+those three callers that is there after the run: the
 required-files gate is red on a repo without a manifest, so a fresh repo would fail Tier 1
 on its first run. A manifest the repo already has is never edited. The one other change it
 makes is to move the gates pin lines in a workflow that already calls this toolkit, and
