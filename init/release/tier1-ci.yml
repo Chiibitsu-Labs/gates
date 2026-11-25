@@ -194,9 +194,9 @@ jobs:
   # release-URL download trades SHA-pinned code for unverified bytes piped into execution.
   # If you wire a history scanner yourself, prove it can fail before you trust it.
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.2.2
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.0
     with:
-      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.2.2
+      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.0
 
   # NO CLAUDE SESSION LINKS ON A PUBLIC REPO (vibeOS `templates/claude-md.md`, "Credit on
   # GitHub"; the founder, 2026-11-11). A link pushed to a public repo stays readable in its history.
