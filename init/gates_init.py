@@ -742,7 +742,9 @@ def cmd_init(target, sha, toolkit=TOOLKIT, today=None):
         print("%-7s %s" % (verb.split()[0], show(path)) + ("" if verb == "wrote" else "  (%s)" % verb))
     for n in notes:
         print(n)
-    print("init: done. Read the diff, run the gates, and open a PR; init never commits or pushes.")
+    print("init: done. Read the diff, commit it, then run the gates and open a PR: the "
+          "required-files gate is red on a listed file git does not track yet. init never commits "
+          "or pushes.")
     return 0
 
 
