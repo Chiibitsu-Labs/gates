@@ -76,6 +76,12 @@ WF = ".github/workflows"
 TIER1 = (WF + "/tier1.yml", "tier1-ci.yml")
 REVIEWC = (WF + "/review.yml", "review-ci.yml")
 SECURITY = (WF + "/security.yml", "security-ci.yml")
+# The toolkit's required-files gate is red on a repo with no manifest, so a repo init has just
+# written would fail Tier 1 on its first run. init writes one only where the repo has none.
+MANIFEST = "scripts/gates/required-files.txt"
+MANIFEST_HEAD = ("# Written by `gates init` because this repo had no manifest. One path per line; the\n"
+                 "# required-files gate is red when a path here is missing or untracked. This file is\n"
+                 "# the repo's own from now on: add to it, and init never edits it again.\n")
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 # Detect wide: the toolkit's (or its old name's) workflow path anywhere on a line, any case.
@@ -598,6 +604,16 @@ def plan(target, sha, today, history, release=RELEASE):
         writes.append((SECURITY[0], read(os.path.join(release, SECURITY[1])), "wrote"))
         notes.append("note    %s carries the pin this release was cut with; its header's step 1 "
                      "(read the current SHA with git ls-remote) is still yours to do." % SECURITY[0])
+
+    # A manifest the repo has is not init's to write, so it is not guarded either: however
+    # the repo keeps it (behind a link, say), init leaves it and goes on.
+    if os.path.exists(os.path.join(target, MANIFEST)):
+        notes.append("same    %s is this repo's own; init never edits it" % MANIFEST)
+    elif attempt(guard, target, MANIFEST) is not None:
+        planned = {w[0] for w in writes}
+        paths = [p for p, _ in STANDING] + [p for p in (TIER1[0], REVIEWC[0], SECURITY[0])
+                                            if p in planned or p in docs]
+        writes.append((MANIFEST, MANIFEST_HEAD + "\n".join(paths) + "\n", "wrote"))
 
     if problems:
         raise gathered(problems)
@@ -1316,14 +1332,15 @@ def selftest():
     def pins_of(d):
         return [(k, s) for p in workflow_files(d) for _, k, s in scan(read(os.path.join(d, p)))[0]]
 
-    all_files = [p for p, _ in STANDING] + [TIER1[0], REVIEWC[0], SECURITY[0]]
+    six = [p for p, _ in STANDING] + [TIER1[0], REVIEWC[0], SECURITY[0]]
+    all_files = six + [MANIFEST]
     srcs = dict(STANDING + (TIER1, REVIEWC, SECURITY))
 
-    # 1. an empty directory gets the six files, equal to the release copies bar dates and pins.
+    # 1. an empty directory gets the six files and the manifest, equal to the release copies bar dates and pins.
     a = fresh("empty")
     init(a)
     got = {k: v.decode() for k, v in snapshot(a).items()}
-    ok(sorted(got) == sorted(all_files), "init in an empty directory writes exactly the six files")
+    ok(sorted(got) == sorted(all_files), "init in an empty directory writes exactly the six files and the required-files manifest")
     ok(all(undate(got[p]) == read(os.path.join(RELEASE, srcs[p])) for p, _ in STANDING),
        "the three standing-orders files equal the release copies except the date")
     ok(all(DATE.search(got[p]).group(2) == today for p, _ in STANDING),
@@ -1336,6 +1353,44 @@ def selftest():
        "the two gates callers equal the release copies byte for byte once the release's SHA is replaced by the running one")
     ok(got[SECURITY[0]] == read(os.path.join(RELEASE, SECURITY[1])), "the security caller equals the release copy")
     ok(check(a) == [], "the check is green on a freshly initialised tree")
+    listed = [l for l in got[MANIFEST].split("\n") if l and not l.startswith("#")]
+    ok(listed == six and got[MANIFEST].startswith(MANIFEST_HEAD),
+       "the manifest init writes lists exactly the six files it wrote, one per line, under a header that says whose it is")
+    gate = os.path.join(TOOLKIT, "gates", "required-files.sh")
+    def gate_run(d):
+        return subprocess.run(["bash", gate, d], capture_output=True, text=True)
+    g = fresh("manifest-gate")
+    ok(gate_run(g).returncode != 0 and "missing manifest" in gate_run(g).stdout + gate_run(g).stderr,
+       "(the toolkit's required-files gate is red on a repo with no manifest, which is why init writes one)")
+    init(g)
+    ok(gate_run(g).returncode == 0, "and that gate passes on the tree init has just written")
+    m = fresh("manifest-own")
+    write(m, MANIFEST, "README.md\n")
+    _, notes_m = init(m)
+    ok(raw(m, MANIFEST) == "README.md\n" and any(MANIFEST in n and "never edits" in n for n in notes_m),
+       "a manifest the repo already has is left byte for byte as it was, and init says so")
+    o = fresh("manifest-onefile")
+    write(o, WF + "/ci.yml", "jobs:\n  gates:\n" + "    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s\n    with:\n      gates_ref: %s\n" % (N, N)
+          + "  review:\n    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@%s\n" % N)
+    init(o)
+    ok([l for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")] == [p for p, _ in STANDING] + [SECURITY[0]]
+       and all(os.path.exists(os.path.join(o, l)) for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")),
+       "in a repo whose callers live in one file of its own, the manifest names only paths that exist after the run")
+    w = fresh("manifest-own-security")
+    write(w, SECURITY[0], "name: mine\non: push\njobs: {}\n")
+    init(w)
+    ok([l for l in raw(w, MANIFEST).split("\n") if l and not l.startswith("#")] == six,
+       "a security.yml of the repo's own, which init does not write, is still listed: the manifest names what is there after the run")
+    v = fresh("manifest-behind-link")
+    write(v, "tools/gates/required-files.txt", "README.md\n")
+    os.symlink("tools", os.path.join(v, "scripts"))
+    init(v)
+    ok(raw(v, "tools/gates/required-files.txt") == "README.md\n" and os.path.exists(os.path.join(v, "CLAUDE.md")),
+       "a manifest the repo keeps behind a symlink is left alone and does not stop the run: init guards only what it writes")
+    k = fresh("manifest-link")
+    os.makedirs(os.path.join(k, "elsewhere"))
+    os.symlink("elsewhere", os.path.join(k, "scripts"))
+    ok(refused(k, "symlink"), "a manifest path that runs through a symlink is refused like any other path init writes")
 
     # 2. a second run changes nothing, on a later day too.
     before = snapshot(a)
@@ -1462,7 +1517,7 @@ def selftest():
         after = snapshot(d)
         ok(raw(outside, "victim.txt") == "precious\n" and all(after[k] == v for k, v in before.items())
            and sorted(set(after) - set(before)) == sorted(all_files) and check(d) == [],
-           "%s planted at a temporary-looking name beside each destination is neither followed, overwritten nor removed, and the six files are written" % kind)
+           "%s planted at a temporary-looking name beside each destination is neither followed, overwritten nor removed, and the six files and the manifest are written" % kind)
         os.remove(os.path.join(outside, "victim.txt"))
     d = fresh("dir-dest")
     os.makedirs(os.path.join(d, TIER1[0]))
@@ -1499,7 +1554,7 @@ def selftest():
         rc_bad, rc_good = cmd_init(d, N1, toolkit=kit_n, today=today), cmd_init(d, N, toolkit=kit_n, today=today)
     ok(rc_bad == 1 and "PROBLEM" in out.getvalue() and rc_good == 0 and out.getvalue().count("init: done") == 1
        and sorted(snapshot(d)) == sorted(all_files),
-       "the `init` command exits 1 with a PROBLEM line on a refusal and 0 after writing the six files")
+       "the `init` command exits 1 with a PROBLEM line on a refusal and 0 after writing the six files and the manifest")
     run(["git", "add", "planted.py"], dirty)
     run(["git"] + env + ["commit", "-q", "-m", "tracked"], dirty)
     ok(unclean(dirty) is None, "a checkout with nothing changed is clean")

@@ -140,9 +140,13 @@ sends someone hunting for a bug in their code rather than a blind spot in the ga
 `init/gates_init.py` writes a repo's standing orders and keeps them at the protocol version
 this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes six files:
 `CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
-`security.yml` in the repo's workflows directory. The one other change it makes is to move
-the gates pin lines in a workflow that already calls this toolkit, and nothing else in that
-file. It never touches a `.gitignore`, a hook, a README or a board, never writes through a
+`security.yml` in the repo's workflows directory. Where the repo has no
+`scripts/gates/required-files.txt`, it writes that too, listing the three standing-orders files and each of
+those three callers that is there after the run: the
+required-files gate is red on a repo without a manifest, so a fresh repo would fail Tier 1
+on its first run. A manifest the repo already has is never edited. The one other change it
+makes is to move the gates pin lines in a workflow that already calls this toolkit, and
+nothing else in that file. It never touches a `.gitignore`, a hook, a README or a board, never writes through a
 symlink or a hard link, and never commits or pushes.
 
 ```sh
@@ -150,6 +154,19 @@ git clone https://github.com/Chiibitsu-Labs/gates && git -C gates checkout <sha>
 git -C gates rev-parse HEAD                       # must print <sha>
 python3 gates/init/gates_init.py init /path/to/repo --sha <sha>
 ```
+
+**A brand-new repo, measured on the first real one (2026-11-25).** Three things are true of
+the first pull request in a repo init has just been run in, and none is a fault to fix
+there:
+
+- The repo needs one commit on its default branch first, or the pull request has no base. A
+  README is enough.
+- The review caller reports `UNKNOWN [review] no REVIEW.md at the base revision` and fails.
+  The reviewer reads its policy from the base revision, never from the pull request, and the
+  base of a repo's first pull request cannot hold one yet. It runs from the second pull
+  request on. The reviewer is never a required check.
+- The Tier 1 caller's `project:` job is the template's placeholder for your stack and is red
+  until its steps are swapped for the repo's own (its header's step 4).
 
 **Which SHA, and which code runs.** The script is chosen by the checkout you are about to
 trust, so the SHA comes from one of two places only: the Tier 1 caller's `gates_ref` as it

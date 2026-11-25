@@ -65,6 +65,7 @@ jobs:
           path: repo
 
       - name: Checkout the gate toolkit
+        id: toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Chiibitsu-Labs/gates
@@ -78,7 +79,12 @@ jobs:
       # protocol version this release declares, and the gates pins are in init's form and
       # agree. Same rule as the gates above: its own --selftest runs first, and fails unless
       # every refusal and every red it names fired; then the check runs on the tree.
+      # Runs even when the gates step above went red. Measured on the first real repo init
+      # was run in (2026-11-25): one red gate skipped this step, so the run said nothing about
+      # the standing orders at all. Each reports on its own; either red fails the job. It still
+      # needs the toolkit checked out, so a refused pin or a failed checkout skips it as before.
       - name: Standing orders match this release
+        if: ${{ !cancelled() && steps.toolkit.outcome == 'success' }}
         env:
           CALLER_REPO: ${{ github.repository }}
         run: |
