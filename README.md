@@ -292,7 +292,8 @@ hesitation while a placeholder cannot be. `caller-template.yml` ships a real SHA
 to run; this prose does not.
 
 Copy `caller-template.yml` into your repo as `.github/workflows/gates.yml`. It ships a real
-SHA rather than a placeholder, and that SHA is the **previous** release. Replace **all three**
+SHA rather than a placeholder, and that SHA is whichever release the file was last moved to
+(the previous one inside a tagged release, the latest one on `main` between releases). Replace **all three**
 occurrences with the one you want from the Releases table below — the `gates:` `uses:` ref,
 the `gates_ref:` under it, and the `review:` `uses:` ref. The first two must stay identical to
 each other: a reusable workflow cannot discover its own commit, so the ref it runs from has to
@@ -447,23 +448,23 @@ In this order, in one sitting:
    products), and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
 3. Run `./selftest.sh .` and `python3 init/gates_init.py --selftest`; merge; tag; add the row
    below.
-4. **Re-instantiate the blank template repo from the new release in the same sitting**
-   (vibeOS's repo-bootstrap spec, Behavior C.3): run `init` in it from a clone at the new
-   release's SHA, the one the founder states for the bump (the standing orders that repo
-   carries allow no other source: never a tag name). Read the diff and open the PR. Announce
-   the release only once it has merged: until then a repo created from the template is born
-   behind. The Next.js app template reads the standing orders live, which this release's
-   `init` does not handle; it stays on its current pin until the slice that adds that. Every
-   other repo moves when a session runs `init` from the new release; until then its pin, and
-   so its check, is unchanged. "Red when stale" means stale against the pinned release,
-   never against vibeOS's head.
-5. **Move `caller-smoke.yml`'s pin** to the new release in a follow-up PR, as before, and
+4. **There is no template repo to re-instantiate** (the founder's ruling, 2026-11-25: no blank
+   template; a new repo is made empty and `init` is run in it). Every repo moves when a
+   session runs `init` from the new release, at the SHA the founder states for the bump (the
+   standing orders a repo carries allow no other source: never a tag name); until then its
+   pin, and so its check, is unchanged. "Red when stale" means stale against the pinned
+   release, never against vibeOS's head. The Next.js app template reads the standing orders
+   live, which this release's `init` does not handle; it stays on its current pin until the
+   slice that adds that.
+5. **Move `caller-smoke.yml`'s pin, and the three pins in `caller-template.yml`,** to the new
+   release in a follow-up PR, and
    only to a release that carries the exemption: one that carries the check without it is
    red here. From that release on the standing-orders check does not run over this repo: the
    founder ruled it exempt
-   (2026-11-24), and `gates.yml` says so on every run (see "Standing orders" above). On the
-   first bump to a release that carries the exemption, read the run's log for the
-   `EXEMPT [standing-orders]` line: the exemption has not run in CI until then.
+   (2026-11-24), and `gates.yml` says so on every run (see "Standing orders" above). The
+   exemption first ran in CI on the bump to v1.3.0 (2026-11-25). On every later bump, read
+   the gates job's log for the `EXEMPT [standing-orders]` line all the same: its absence
+   means the check ran over this repo, or did not run at all.
 
 ## Known gaps
 

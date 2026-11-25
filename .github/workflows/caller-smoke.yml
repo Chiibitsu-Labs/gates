@@ -5,8 +5,10 @@ name: caller-smoke
 # run: github.job_workflow_sha resolved to nothing, and the job stopped instead of
 # silently checking out HEAD.
 #
-# Pinned at v1.0.3, deliberately a fixed commit and not the branch head, because that is
-# what a consumer does.
+# Pinned at v1.3.0, deliberately a fixed commit and not the branch head, because that is
+# what a consumer does. From this release the standing-orders check does not run over this
+# repo: it is exempt (the founder's ruling, 2026-11-24), and the run's log says so with an
+# `EXEMPT [standing-orders]` line. The README's release checklist says how this pin moves.
 on:
   pull_request:
   push:
@@ -16,6 +18,6 @@ permissions:
 
 jobs:
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@25a1ca1f7ad7875138dd943657a5f7f1a3aa1809 # v1.0.3
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@3e31679080575b785db7f2b5b976e1b4ae0f0e9a # v1.3.0
     with:
-      gates_ref: 25a1ca1f7ad7875138dd943657a5f7f1a3aa1809 # v1.0.3
+      gates_ref: 3e31679080575b785db7f2b5b976e1b4ae0f0e9a # v1.3.0
