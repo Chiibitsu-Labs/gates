@@ -1084,6 +1084,26 @@ def derive_claude(t):
     return t
 
 
+EDITED_WRAPPER = {"on": ["  pull_request:", "    types: [edited]"],
+                  "permissions": ["  contents: read"]}
+
+
+def _top_block(text, key):
+    """The lines under the top-level `key:` of a workflow (its indented lines, blank lines
+    dropped), or None when there is not exactly one such key. A comment at column 0 ends the block."""
+    lines = text.split("\n")
+    at = [i for i, l in enumerate(lines) if l == key + ":"]
+    if len(at) != 1:
+        return None
+    out = []
+    for l in lines[at[0] + 1:]:
+        if l.strip() and not l.startswith(" "):
+            break
+        if l.strip():
+            out.append(l)
+    return out
+
+
 def derive_text(name, text, label):
     text = _founder(text)
     if name == "claude-md.md":
@@ -1110,6 +1130,17 @@ def derive_text(name, text, label):
                 or security != (name == SECURITY[1])):
             raise refuse("derive-caller-form", "derive: templates/%s does not carry exactly %s in "
                          "the form init writes" % (name, " and ".join(want) or "one security call"))
+        if name == EDITED[1]:
+            # The job is compared with Tier 1's by check_edited_copy; what makes it run on an edited
+            # PR, and with a read-only token, is the wrapper around it, so that is read here: the
+            # event and activity type, and the permissions. Only the two blocks are read, so a comment
+            # that names another event is not mistaken for one.
+            for key, want_lines in EDITED_WRAPPER.items():
+                if _top_block(text, key) != want_lines:
+                    raise refuse("derive-caller-form", "derive: templates/%s must carry exactly %s under "
+                                 "`%s:` (the edited-PR check runs on an edited pull request only, with a "
+                                 "read-only token) and nothing else there"
+                                 % (name, " and ".join("`%s`" % l.strip() for l in want_lines), key))
         if name not in (SECURITY[1], EDITED[1]):
             # The pin label names the release being cut (CITATION.cff), never the one vibeOS's
             # template was last bumped to.
@@ -2099,6 +2130,20 @@ def selftest():
     ok(derive_text(EDITED[1], ed_t, label) == ed_t, "derive passes the committed edited-PR session-link caller through unchanged")
     ok(fires("derive-caller-form", lambda: derive_text(EDITED[1], ed_t + G, label)),
        "derive refuses an edited-PR caller template that also calls the toolkit")
+    for why, bad_t in (("an activity type other than edited", ed_t.replace("types: [edited]", "types: [opened]", 1)),
+                       ("a second activity type", ed_t.replace("types: [edited]", "types: [edited, opened]", 1)),
+                       ("pull_request_target in its place", ed_t.replace("  pull_request:\n    types: [edited]", "  pull_request_target:\n    types: [edited]", 1)),
+                       ("a push trigger in its place", ed_t.replace("  pull_request:\n    types: [edited]", "  push:", 1)),
+                       ("a second event beside it", ed_t.replace("    types: [edited]\n", "    types: [edited]\n  push:\n", 1)),
+                       ("the trigger written in another form", ed_t.replace("on:\n  pull_request:\n    types: [edited]", "on: [pull_request]", 1)),
+                       ("a write permission", ed_t.replace("  contents: read\n", "  contents: write\n", 1)),
+                       ("an added permission", ed_t.replace("  contents: read\n", "  contents: read\n  pull-requests: write\n", 1)),
+                       ("no permissions block", ed_t.replace("permissions:\n  contents: read\n\n", "", 1)),
+                       ("no trigger block", ed_t.replace("on:\n  pull_request:\n    types: [edited]\n\n", "", 1))):
+        ok(bad_t != ed_t and fires("derive-caller-form", lambda: derive_text(EDITED[1], bad_t, label)),
+           "derive refuses an edited-PR caller template with %s" % why)
+    ok("pull_request_target" in ed_t and derive_text(EDITED[1], ed_t, label) == ed_t,
+       "a comment that names pull_request_target does not trip the trigger check: only the on: and permissions: blocks are read")
     t1_t = read(os.path.join(RELEASE, TIER1[1]))
     ok(not fires("derive-edited-drift", lambda: check_edited_copy(t1_t, ed_t)),
        "the committed Tier 1 caller and edited-PR caller carry one session-links job, apart from its name")
