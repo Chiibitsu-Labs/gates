@@ -300,7 +300,7 @@ release. `init/release/PROTOCOL` declares the version and the vibeOS commit it c
 `init/release/session-links-edited-ci.yml` is vibeOS's `chiibitsu/vibeOS:templates/session-links-edited-ci.yml`
 as it stands: it names no private repo or person and carries no pin, so derive passes it through, after reading
 the two blocks that make it do its job: `on:` must be `pull_request` with `types: [edited]` and nothing else,
-and `permissions:` must be `contents: read` and nothing else (any other form is refused, not guessed at). vibeOS keeps
+and `permissions:` must be `contents: read` and nothing else (any other form is refused, not guessed at; a comment never ends a block, as in YAML). vibeOS keeps
 its job as a second copy of the Tier 1 caller's `session-links:` job and says nothing checks that they match, so
 derive does: it refuses a pair that differs in anything but the job's name, or whose two names are the same.
 

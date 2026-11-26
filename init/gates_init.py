@@ -1089,18 +1089,21 @@ EDITED_WRAPPER = {"on": ["  pull_request:", "    types: [edited]"],
 
 
 def _top_block(text, key):
-    """The lines under the top-level `key:` of a workflow (its indented lines, blank lines
-    dropped), or None when there is not exactly one such key. A comment at column 0 ends the block."""
+    """The lines under the top-level `key:` of a workflow, comments and blank lines dropped, or
+    None when there is not exactly one such key. YAML ignores a comment wherever it sits, so a
+    comment never ends the block: it ends at the next line that is not a comment and starts at
+    column 0."""
     lines = text.split("\n")
     at = [i for i, l in enumerate(lines) if l == key + ":"]
     if len(at) != 1:
         return None
     out = []
     for l in lines[at[0] + 1:]:
-        if l.strip() and not l.startswith(" "):
+        if not l.strip() or l.lstrip().startswith("#"):
+            continue
+        if not l.startswith(" "):
             break
-        if l.strip():
-            out.append(l)
+        out.append(l)
     return out
 
 
@@ -1253,8 +1256,10 @@ def published(vibeos, origin_rx=VIBEOS_ORIGIN):
 
 def _session_links_job(text, what):
     """The `session-links:` job of a caller template: its lines, with its own `name:` replaced,
-    and that name. The job runs from its key to the next non-blank line indented two or less (the
-    next job, or a comment between jobs), so a comment after it is not part of it."""
+    and that name. YAML ignores a comment wherever it sits, so a comment never ends the job: it
+    runs from its key to the next line that is not a comment and is indented two or less (the
+    next job). Comments and blank lines at its end are dropped, as they belong to whatever
+    follows; comments inside it are kept and compared."""
     lines = text.split("\n")
     starts = [i for i, l in enumerate(lines) if l == "  session-links:"]
     if len(starts) != 1:
@@ -1262,10 +1267,10 @@ def _session_links_job(text, what):
                      "that its two copies agree needs exactly one" % (what, len(starts)))
     job = [lines[starts[0]]]
     for l in lines[starts[0] + 1:]:
-        if l.strip() and len(l) - len(l.lstrip(" ")) <= 2:
+        if l.strip() and not l.lstrip().startswith("#") and len(l) - len(l.lstrip(" ")) <= 2:
             break
         job.append(l)
-    while job and not job[-1].strip():
+    while job and (not job[-1].strip() or job[-1].lstrip().startswith("#")):
         job.pop()
     at = [i for i, l in enumerate(job) if l.startswith("    name: ")]
     if len(at) != 1:
@@ -2142,6 +2147,24 @@ def selftest():
                        ("no trigger block", ed_t.replace("on:\n  pull_request:\n    types: [edited]\n\n", "", 1))):
         ok(bad_t != ed_t and fires("derive-caller-form", lambda: derive_text(EDITED[1], bad_t, label)),
            "derive refuses an edited-PR caller template with %s" % why)
+    cm = "# c\n"   # YAML ignores comments, wherever they sit: a comment is never the end of a mapping
+    for why, bad_t in (("an event added after a column-0 comment", ed_t.replace("    types: [edited]\n", "    types: [edited]\n" + cm + "  pull_request_target:\n    types: [edited]\n", 1)),
+                       ("a permission added after a column-0 comment", ed_t.replace("  contents: read\n", "  contents: read\n" + cm + "  pull-requests: write\n", 1)),
+                       ("a permission added after a comment and a blank line", ed_t.replace("  contents: read\n", "  contents: read\n\n" + cm + "\n  pull-requests: write\n", 1))):
+        ok(bad_t != ed_t and fires("derive-caller-form", lambda: derive_text(EDITED[1], bad_t, label)),
+           "derive refuses an edited-PR caller template with %s" % why)
+    noted = ed_t.replace("    types: [edited]\n", "    # a note inside the block\n    types: [edited]\n", 1)
+    ok(noted != ed_t and derive_text(EDITED[1], noted, label) == noted,
+       "a comment inside the on: block, adding no entry, is accepted")
+    t1_t = read(os.path.join(RELEASE, TIER1[1]))
+    mid = "      - name: Commits, changed files and PR text hold no session link\n"
+    t1_c, ed_c = t1_t.replace(mid, "  # a comment at the job's own indent\n" + mid, 1), ed_t.replace(mid, "  # a comment at the job's own indent\n" + mid, 1)
+    ok(t1_c != t1_t and ed_c != ed_t and not fires("derive-edited-drift", lambda: check_edited_copy(t1_c, ed_c)),
+       "a comment at the job's own indent inside both copies is not drift: the job does not end there")
+    ok(fires("derive-edited-drift", lambda: check_edited_copy(t1_c, ed_c.replace("PAT='Claude", "PAT2='Claude", 1))),
+       "a step that differs after such a comment is still drift: the comment does not hide what follows it")
+    ok(fires("derive-edited-drift", lambda: check_edited_copy(t1_c, ed_t.replace("PAT='Claude", "PAT2='Claude", 1))),
+       "and so is a copy with the comment on one side only and a changed step after it")
     ok("pull_request_target" in ed_t and derive_text(EDITED[1], ed_t, label) == ed_t,
        "a comment that names pull_request_target does not trip the trigger check: only the on: and permissions: blocks are read")
     t1_t = read(os.path.join(RELEASE, TIER1[1]))
