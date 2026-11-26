@@ -19,7 +19,10 @@
 #   3. Turn on GitHub's native secret scanning, and wire merge-time enforcement separately.
 #      The toolkit scans the working tree only.  (see: the `gates:` job)
 #   4. Swap the `project:` job's steps for your stack, or delete a step and say why in the
-#      commit — never neuter one into always-green.  (see: the `project:` job)
+#      commit — never neuter one into always-green. A repo with no `package.json` yet skips
+#      the job's Node steps out loud (a notice and a step summary), so a repo with no stack
+#      starts green rather than red; that skip is green but gates nothing, so it is not a
+#      pass for any stack, and a repo on another stack swaps the steps.  (see: the `project:` job)
 #   5. Mark this workflow's JOBS required in branch protection — not the workflow, and not
 #      the draft reviewer. Branch protection selects CHECK RUNS, and a check run is a job,
 #      never a workflow: measured on vibeOS's own PR, whose Tier 1 workflow runs one
@@ -194,9 +197,9 @@ jobs:
   # release-URL download trades SHA-pinned code for unverified bytes piped into execution.
   # If you wire a history scanner yourself, prove it can fail before you trust it.
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.0
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.1
     with:
-      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.0
+      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.1
 
   # NO CLAUDE SESSION LINKS ON A PUBLIC REPO (vibeOS `templates/claude-md.md`, "Credit on
   # GitHub"; the founder, 2026-11-11). A link pushed to a public repo stays readable in its history.
@@ -461,6 +464,17 @@ jobs:
   # This repo's own Tier 1 steps. Node/TypeScript assumed; swap the runtime steps for
   # another stack and keep the shape. If a step does not apply, delete it and say why in
   # the commit — do not neuter it into always-green.
+  #
+  # NO MANIFEST, NO NODE STEPS — OUT LOUD. A repo with no `package.json` at its root has no
+  # stack yet, and `setup-node` would fail on the missing `.nvmrc` before any gate ran: a red
+  # that says nothing about the code. The "Detect project manifest" step turns that into a
+  # skip that PRINTS what it skipped (a `::notice::` and a step summary), and every Node step
+  # below carries the same `if:`. The job itself still runs and still goes red on a real
+  # failure: no `continue-on-error`, no job-level `if:` (a skipped job would print nothing).
+  # A repo WITH a `package.json` runs every step exactly as before, so one with no `.nvmrc`
+  # is still red. Two things this does NOT do: it does not look in subfolders (a
+  # `package.json` below the root reads as no manifest, so point the steps at it), and it is
+  # not a pass for a repo on another stack — such a repo swaps these steps, per the above.
   project:
     name: Project gates
     runs-on: ubuntu-latest
@@ -473,7 +487,22 @@ jobs:
           # too; this job has its own and does not inherit that one.
           lfs: true
 
+      - name: Detect project manifest
+        id: manifest
+        run: |
+          if [ -f package.json ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "package.json found: running the project gates."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            MSG="Project gates SKIPPED: no package.json at the repo root, so there is no project to gate yet. Add one (and a .nvmrc) or swap these steps for your stack; until then this check passes without having run any."
+            echo "::notice title=Project gates skipped::$MSG"
+            echo "### Project gates skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Setup Node
+        if: steps.manifest.outputs.found == 'true'
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with:
           node-version-file: .nvmrc
@@ -482,12 +511,15 @@ jobs:
       # `npm ci`, not `npm install` — installs exactly the lockfile and fails when the
       # lockfile and package.json disagree. That disagreement is a real signal.
       - name: Install
+        if: steps.manifest.outputs.found == 'true'
         run: npm ci
 
       - name: Typecheck
+        if: steps.manifest.outputs.found == 'true'
         run: npm run typecheck
 
       - name: Lint
+        if: steps.manifest.outputs.found == 'true'
         run: npm run lint
 
       # docs/04's Tier 1 list is "typecheck, lint, format" — format is its own gate, not
@@ -495,17 +527,21 @@ jobs:
       # at all, so leaving this out lets malformed files through a gate that advertises
       # itself as the complete list.
       - name: Format check
+        if: steps.manifest.outputs.found == 'true'
         run: npm run format:check
 
       - name: Test
+        if: steps.manifest.outputs.found == 'true'
         run: npm test
 
       - name: Build
+        if: steps.manifest.outputs.found == 'true'
         run: npm run build
 
       # Fails on HIGH and above. Tune the threshold deliberately; do not delete the step
       # because it is noisy — noisy here means genuinely vulnerable deps.
       - name: Dependency audit
+        if: steps.manifest.outputs.found == 'true'
         run: npm audit --audit-level=high
 
       # docs/04 Tier 1 also requires "preview deploy succeeds". That cannot live here:
