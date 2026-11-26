@@ -138,11 +138,11 @@ sends someone hunting for a bug in their code rather than a blind spot in the ga
 ## Standing orders: `gates init` and the version check
 
 `init/gates_init.py` writes a repo's standing orders and keeps them at the protocol version
-this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes six files:
-`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the three callers `tier1.yml`, `review.yml` and
-`security.yml` in the repo's workflows directory. Where the repo has no
+this release carries (vibeOS's repo-bootstrap spec, slice 2). It writes seven files:
+`CLAUDE.md`, `AGENTS.md`, `REVIEW.md`, and the four callers `tier1.yml`, `review.yml`,
+`security.yml` and `session-links-edited.yml` in the repo's workflows directory. Where the repo has no
 `scripts/gates/required-files.txt`, it writes that too, listing the three standing-orders files and each of
-those three callers that is there after the run: the
+those four callers that is there after the run: the
 required-files gate is red on a repo without a manifest, so a fresh repo would fail Tier 1
 on its first run. A manifest the repo already has is never edited. The one other change it
 makes is to move the gates pin lines in a workflow that already calls this toolkit, and
@@ -231,6 +231,21 @@ see is never guessed at. Two shapes it cannot see by reading lines are under Kno
   `Chiibitsu-Labs/security-checks` and no `security.yml` exists. init never rewrites that
   pin (its `# main` hint is for Renovate), and a fresh one still needs its header's step 1.
   A `security.yml` of the repo's own is left alone, and init says it wrote no security caller.
+- **The edited-PR session-link caller** (`session-links-edited.yml`) is written only when no file
+  is at that path, in a new repo and in one an earlier release set up. It exists because the Tier 1
+  caller's `session-links:` job never runs when a pull request is edited: a session link pasted into
+  the title or description after the last push goes unread, on a public repo. This workflow runs
+  the same job on `edited`, under its own job name, and the Tier 1 caller's header points at it. It
+  carries no pin, so a later release moves nothing in it, and init never rewrites one that is
+  there, whatever its body (it says so). It is not added to a manifest the repo already has: that file
+  is the repo's own, so add the path there yourself if the required-files gate should guard it, and
+  init says so when it writes the file into such a repo. Do not mark its job required in branch
+  protection: it runs only on an edit, so a pull request never edited would wait for it. The check does not ask for
+  the file; a repo that moves its pin without running init is already red on its markers.
+  **A repo an earlier release set up gets it by running init again, from a release that carries
+  `init/release/session-links-edited-ci.yml`, at the SHA the founder states:** init adds the one new file, moves the
+  pins, and changes nothing else it does not own. Its body is a copy of the Tier 1 job, so a later fix to
+  that job does not reach a copy a repo already has; replace the file by hand then.
 - **All or nothing:** any refusal in any file stops the run before a write. Writes go to
   new, randomly named temporary files first and are then moved into place; if a move fails, init names the files
   it had already moved, never "nothing was written". TARGET must be an existing directory.
@@ -282,6 +297,10 @@ the name, the ledger heading and the vault lead. They do not catch an unbacktick
 `acme/widget` in prose, a zone name or abbreviation the vendored list does not hold, or any
 other person's or client's name, so reading the derived diff for those is part of every
 release. `init/release/PROTOCOL` declares the version and the vibeOS commit it came from.
+`init/release/session-links-edited-ci.yml` is vibeOS's `chiibitsu/vibeOS:templates/session-links-edited-ci.yml`
+as it stands: it names no private repo or person and carries no pin, so derive passes it through. vibeOS keeps
+its job as a second copy of the Tier 1 caller's `session-links:` job and says nothing checks that they match, so
+derive does: it refuses a pair that differs in anything but the job's name, or whose two names are the same.
 
 ## How to call it
 
@@ -444,7 +463,9 @@ In this order, in one sitting:
    `origin/main`, then `python3 init/gates_init.py derive <that checkout>`. It refuses a
    checkout that is not clean, not from `chiibitsu/vibeOS`, or not at `origin/main`, and it
    fails rather than guess when a template moved under one of its edits; fix the edit, never
-   the check. It labels the callers' pins with step 1's version. Read the diff of
+   the check. It also refuses vibeOS templates whose two copies of the `session-links:` job
+   (the Tier 1 caller's and the edited-PR caller's) have drifted apart: fix both in vibeOS, in
+   one commit. It labels the callers' pins with step 1's version. Read the diff of
    `init/release/` for anything the shape checks cannot see (people's and clients' names,
    products), and confirm `PROTOCOL` names the version `chiibitsu/vibeOS:docs/02` declares.
 3. Run `./selftest.sh .` and `python3 init/gates_init.py --selftest`; merge; tag; add the row

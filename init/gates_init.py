@@ -76,6 +76,9 @@ WF = ".github/workflows"
 TIER1 = (WF + "/tier1.yml", "tier1-ci.yml")
 REVIEWC = (WF + "/review.yml", "review-ci.yml")
 SECURITY = (WF + "/security.yml", "security-ci.yml")
+# The Tier 1 caller's `session-links:` job never runs on an edited PR, so a session link pasted
+# into a description after the last push goes unread. This workflow runs the same job on `edited`.
+EDITED = (WF + "/session-links-edited.yml", "session-links-edited-ci.yml")
 # The toolkit's required-files gate is red on a repo with no manifest, so a repo init has just
 # written would fail Tier 1 on its first run. init writes one only where the repo has none.
 MANIFEST = "scripts/gates/required-files.txt"
@@ -119,6 +122,7 @@ REFUSALS = (
     "derive-edit-count", "derive-paragraph", "derive-bare-path", "derive-no-marker",
     "derive-caller-form", "derive-leak", "derive-version-mismatch", "derive-no-protocol",
     "derive-no-citation", "derive-unclean", "derive-origin", "derive-no-main", "derive-not-main",
+    "derive-edited-drift",
 )
 REDS = (
     "missing-file", "unreadable-file", "odd-line-break", "missing-marker", "unreadable-marker",
@@ -605,13 +609,29 @@ def plan(target, sha, today, history, release=RELEASE):
         notes.append("note    %s carries the pin this release was cut with; its header's step 1 "
                      "(read the current SHA with git ls-remote) is still yours to do." % SECURITY[0])
 
+    # The edited-PR session-link caller. Like the security caller it is written only where no file
+    # is at its path, and never rewritten: its body is the repo's from then on. It carries no pin,
+    # so a later release moves nothing in it. It runs the same job as the Tier 1 caller's
+    # `session-links:`, on an edited PR, which that caller never runs on; on a private repo the
+    # job passes at once, so writing it everywhere costs nothing.
+    new_edited = False
+    if EDITED[0] in docs:
+        notes.append("same    %s is this repo's own; init never edits it" % EDITED[0])
+    elif attempt(guard, target, EDITED[0]) is not None:
+        writes.append((EDITED[0], read(os.path.join(release, EDITED[1])), "wrote"))
+        new_edited = True
+
     # A manifest the repo has is not init's to write, so it is not guarded either: however
     # the repo keeps it (behind a link, say), init leaves it and goes on.
     if os.path.exists(os.path.join(target, MANIFEST)):
         notes.append("same    %s is this repo's own; init never edits it" % MANIFEST)
+        if new_edited:
+            notes.append("note    %s is new here and is not added to %s, which is this repo's own: add "
+                         "the path there yourself if the required-files gate should guard it."
+                         % (EDITED[0], MANIFEST))
     elif attempt(guard, target, MANIFEST) is not None:
         planned = {w[0] for w in writes}
-        paths = [p for p, _ in STANDING] + [p for p in (TIER1[0], REVIEWC[0], SECURITY[0])
+        paths = [p for p, _ in STANDING] + [p for p in (TIER1[0], REVIEWC[0], SECURITY[0], EDITED[0])
                                             if p in planned or p in docs]
         writes.append((MANIFEST, MANIFEST_HEAD + "\n".join(paths) + "\n", "wrote"))
 
@@ -1085,12 +1105,12 @@ def derive_text(name, text, label):
         # security caller included: init writes these files as they are, and the check is red
         # on any other form.
         pins, bad, sec_bad, security = scan(text)
-        want = {TIER1[1]: ["gates", "gates_ref"], REVIEWC[1]: ["review"], SECURITY[1]: []}[name]
+        want = {TIER1[1]: ["gates", "gates_ref"], REVIEWC[1]: ["review"], SECURITY[1]: [], EDITED[1]: []}[name]
         if (bad or sec_bad or [k for _, k, _ in pins] != want or unpaired(text, pins)
                 or security != (name == SECURITY[1])):
             raise refuse("derive-caller-form", "derive: templates/%s does not carry exactly %s in "
                          "the form init writes" % (name, " and ".join(want) or "one security call"))
-        if name != SECURITY[1]:
+        if name not in (SECURITY[1], EDITED[1]):
             # The pin label names the release being cut (CITATION.cff), never the one vibeOS's
             # template was last bumped to.
             text = CALLER_NOTE + move_pins(text, None, label)
@@ -1156,7 +1176,7 @@ def leaks(text):
 
 
 RELEASE_FILES = ("claude-md.md", "agents-md.md", "review-md.md",
-                 "tier1-ci.yml", "review-ci.yml", "security-ci.yml")
+                 "tier1-ci.yml", "review-ci.yml", "security-ci.yml", "session-links-edited-ci.yml")
 VIBEOS_ORIGIN = re.compile(r"(?i)^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)"
                            r"chiibitsu/vibeos(?:\.git)?/?$")
 
@@ -1200,8 +1220,57 @@ def published(vibeos, origin_rx=VIBEOS_ORIGIN):
     return head
 
 
+def _session_links_job(text, what):
+    """The `session-links:` job of a caller template: its lines, with its own `name:` replaced,
+    and that name. The job runs from its key to the next non-blank line indented two or less (the
+    next job, or a comment between jobs), so a comment after it is not part of it."""
+    lines = text.split("\n")
+    starts = [i for i, l in enumerate(lines) if l == "  session-links:"]
+    if len(starts) != 1:
+        raise refuse("derive-edited-drift", "derive: %s has %d `session-links:` jobs, and the check "
+                     "that its two copies agree needs exactly one" % (what, len(starts)))
+    job = [lines[starts[0]]]
+    for l in lines[starts[0] + 1:]:
+        if l.strip() and len(l) - len(l.lstrip(" ")) <= 2:
+            break
+        job.append(l)
+    while job and not job[-1].strip():
+        job.pop()
+    at = [i for i, l in enumerate(job) if l.startswith("    name: ")]
+    if len(at) != 1:
+        raise refuse("derive-edited-drift", "derive: the `session-links:` job in %s has %d top-level "
+                     "`name:` lines, and the check that its two copies agree needs exactly one"
+                     % (what, len(at)))
+    name = job[at[0]]
+    job[at[0]] = "    name: <name>"
+    return name, job
+
+
+def check_edited_copy(tier1_text, edited_text):
+    """vibeOS keeps the Tier 1 caller's `session-links:` job and the edited-PR caller's as two copies
+    and says nothing checks that they match. The edited-PR caller is only worth shipping if it is the
+    same check, not a lighter one, so derive refuses a pair that differs in anything but the job's
+    name, and a pair whose names are the same (GitHub calls one job name in two workflows ambiguous
+    for a required check)."""
+    n1, a = _session_links_job(tier1_text, "the Tier 1 caller template")
+    n2, b = _session_links_job(edited_text, "the edited-PR caller template")
+    if n1 == n2:
+        raise refuse("derive-edited-drift", "derive: the Tier 1 caller's `session-links:` job and the "
+                     "edited-PR caller's carry the same name; they must differ, so a required check "
+                     "is never ambiguous between two workflows")
+    if a != b:
+        first = next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), min(len(a), len(b)))
+        raise refuse("derive-edited-drift", "derive: the `session-links:` job in the Tier 1 caller "
+                     "template and in the edited-PR caller template differ, first at line %d of the "
+                     "job (%d lines against %d). vibeOS's template says to keep the two identical, "
+                     "apart from the name, and nothing there checks it: change both in vibeOS in one "
+                     "commit, then derive again." % (first + 1, len(a), len(b)))
+
+
 def derive_all(sources, want, label, names=RELEASE_FILES):
     """sources: {release file name: template text}. Returns the derived texts or refuses."""
+    if TIER1[1] in names and EDITED[1] in names:
+        check_edited_copy(sources[TIER1[1]], sources[EDITED[1]])
     texts = {}
     for name in names:
         src = sources[name]
@@ -1334,15 +1403,15 @@ def selftest():
     def pins_of(d):
         return [(k, s) for p in workflow_files(d) for _, k, s in scan(read(os.path.join(d, p)))[0]]
 
-    six = [p for p, _ in STANDING] + [TIER1[0], REVIEWC[0], SECURITY[0]]
-    all_files = six + [MANIFEST]
-    srcs = dict(STANDING + (TIER1, REVIEWC, SECURITY))
+    house = [p for p, _ in STANDING] + [TIER1[0], REVIEWC[0], SECURITY[0], EDITED[0]]
+    all_files = house + [MANIFEST]
+    srcs = dict(STANDING + (TIER1, REVIEWC, SECURITY, EDITED))
 
-    # 1. an empty directory gets the six files and the manifest, equal to the release copies bar dates and pins.
+    # 1. an empty directory gets the seven files and the manifest, equal to the release copies bar dates and pins.
     a = fresh("empty")
     init(a)
     got = {k: v.decode() for k, v in snapshot(a).items()}
-    ok(sorted(got) == sorted(all_files), "init in an empty directory writes exactly the six files and the required-files manifest")
+    ok(sorted(got) == sorted(all_files), "init in an empty directory writes exactly the seven files and the required-files manifest")
     ok(all(undate(got[p]) == read(os.path.join(RELEASE, srcs[p])) for p, _ in STANDING),
        "the three standing-orders files equal the release copies except the date")
     ok(all(DATE.search(got[p]).group(2) == today for p, _ in STANDING),
@@ -1354,10 +1423,12 @@ def selftest():
            for p, s in (TIER1, REVIEWC)),
        "the two gates callers equal the release copies byte for byte once the release's SHA is replaced by the running one")
     ok(got[SECURITY[0]] == read(os.path.join(RELEASE, SECURITY[1])), "the security caller equals the release copy")
+    ok(got.get(EDITED[0]) == read(os.path.join(RELEASE, EDITED[1])),
+       "the edited-PR session-link caller equals the release copy byte for byte (it carries no pin to replace)")
     ok(check(a) == [], "the check is green on a freshly initialised tree")
     listed = [l for l in got[MANIFEST].split("\n") if l and not l.startswith("#")]
-    ok(listed == six and got[MANIFEST].startswith(MANIFEST_HEAD),
-       "the manifest init writes lists exactly the six files it wrote, one per line, under a header that says whose it is")
+    ok(listed == house and got[MANIFEST].startswith(MANIFEST_HEAD),
+       "the manifest init writes lists exactly the seven files it wrote, one per line, under a header that says whose it is")
     gate = os.path.join(TOOLKIT, "gates", "required-files.sh")
     def gate_run(d):
         return subprocess.run(["bash", gate, d], capture_output=True, text=True)
@@ -1375,13 +1446,13 @@ def selftest():
     write(o, WF + "/ci.yml", "jobs:\n  gates:\n" + "    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@%s\n    with:\n      gates_ref: %s\n" % (N, N)
           + "  review:\n    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@%s\n" % N)
     init(o)
-    ok([l for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")] == [p for p, _ in STANDING] + [SECURITY[0]]
+    ok([l for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")] == [p for p, _ in STANDING] + [SECURITY[0], EDITED[0]]
        and all(os.path.exists(os.path.join(o, l)) for l in raw(o, MANIFEST).split("\n") if l and not l.startswith("#")),
        "in a repo whose callers live in one file of its own, the manifest names only paths that exist after the run")
     w = fresh("manifest-own-security")
     write(w, SECURITY[0], "name: mine\non: push\njobs: {}\n")
     init(w)
-    ok([l for l in raw(w, MANIFEST).split("\n") if l and not l.startswith("#")] == six,
+    ok([l for l in raw(w, MANIFEST).split("\n") if l and not l.startswith("#")] == house,
        "a security.yml of the repo's own, which init does not write, is still listed: the manifest names what is there after the run")
     v = fresh("manifest-behind-link")
     write(v, "tools/gates/required-files.txt", "README.md\n")
@@ -1426,7 +1497,7 @@ def selftest():
     ok(all(raw(c, pth).count("\n") == raw(c, pth).count("\r\n") for pth in all_files)
        and pins_of(c) == [("review", N1), ("gates", N1), ("gates_ref", N1)] and check(c) == []
        and init(c, "N1")[0] == [],
-       "with all six files in CRLF: three regions rewritten, three pins moved to the new SHA, every "
+       "with all seven files in CRLF: three regions rewritten, three pins moved to the new SHA, every "
        "file still all-CRLF, the check green, and a second run writes nothing")
     d = fresh("mixed")
     write(d, "AGENTS.md", read(os.path.join(RELEASE, "agents-md.md")).replace("\n", "\r\n", 3))
@@ -1519,7 +1590,7 @@ def selftest():
         after = snapshot(d)
         ok(raw(outside, "victim.txt") == "precious\n" and all(after[k] == v for k, v in before.items())
            and sorted(set(after) - set(before)) == sorted(all_files) and check(d) == [],
-           "%s planted at a temporary-looking name beside each destination is neither followed, overwritten nor removed, and the six files and the manifest are written" % kind)
+           "%s planted at a temporary-looking name beside each destination is neither followed, overwritten nor removed, and the seven files and the manifest are written" % kind)
         os.remove(os.path.join(outside, "victim.txt"))
     d = fresh("dir-dest")
     os.makedirs(os.path.join(d, TIER1[0]))
@@ -1556,7 +1627,7 @@ def selftest():
         rc_bad, rc_good = cmd_init(d, N1, toolkit=kit_n, today=today), cmd_init(d, N, toolkit=kit_n, today=today)
     ok(rc_bad == 1 and "PROBLEM" in out.getvalue() and rc_good == 0 and out.getvalue().count("init: done") == 1
        and sorted(snapshot(d)) == sorted(all_files),
-       "the `init` command exits 1 with a PROBLEM line on a refusal and 0 after writing the six files and the manifest")
+       "the `init` command exits 1 with a PROBLEM line on a refusal and 0 after writing the seven files and the manifest")
     run(["git", "add", "planted.py"], dirty)
     run(["git"] + env + ["commit", "-q", "-m", "tracked"], dirty)
     ok(unclean(dirty) is None, "a checkout with nothing changed is clean")
@@ -1741,6 +1812,43 @@ def selftest():
     init(d)
     ok(os.path.exists(os.path.join(d, SECURITY[0])),
        "a comment that names the security repo without its workflow path changes nothing: the security caller is written")
+
+    # 8b. the edited-PR session-link caller: written where it is absent, in a repo an earlier release
+    # set up as well as a new one; one the repo already has is its own and is never edited.
+    edd = read(os.path.join(RELEASE, EDITED[1]))
+    d = fresh("edited-older-repo")
+    init(d)
+    old_listed = [l for l in raw(d, MANIFEST).split("\n") if l and l != EDITED[0]]
+    os.remove(os.path.join(d, EDITED[0]))
+    write(d, MANIFEST, "\n".join(old_listed) + "\n")   # what an earlier release left: no edited caller, a manifest of the repo's own
+    old_state = snapshot(d)
+    writes, notes = init(d, "N1", today="2026-02-03")
+    after = snapshot(d)
+    ok([(w[0], w[2]) for w in writes if w[0] == EDITED[0]] == [(EDITED[0], "wrote")]
+       and after[EDITED[0]] == edd.encode() and sorted(set(after) - set(old_state)) == [EDITED[0]],
+       "run in a repo an earlier release set up, init adds the edited-PR session-link caller as a new file and no other new file")
+    ok(after[MANIFEST] == old_state[MANIFEST] and any(MANIFEST in n and EDITED[0] in n and "add" in n for n in notes),
+       "that repo's own manifest is left byte for byte as it was: the new caller is not added to it, and init says so in its output")
+    ok(pins_of(d) == [("review", N1), ("gates", N1), ("gates_ref", N1)],
+       "the same run moves the three gates pins to the release it ran from")
+    ok(init(d, "N1")[0] == [] and check(d) == [], "a second run writes nothing, and the check is green")
+    d = fresh("edited-own")
+    own = "name: mine\non: pull_request\njobs: {}\n"
+    write(d, EDITED[0], own)
+    writes, notes = init(d)
+    ok(raw(d, EDITED[0]) == own and EDITED[0] not in [w[0] for w in writes]
+       and any(EDITED[0] in n and "never edits" in n for n in notes),
+       "an edited-PR caller the repo already has, whatever its body, is left byte for byte as it was, and init says so")
+    d = fresh("edited-link")
+    os.makedirs(os.path.join(d, WF))
+    write(d, "elsewhere.yml", edd)
+    os.symlink(os.path.join(d, "elsewhere.yml"), os.path.join(d, EDITED[0]))
+    ok(refused(d, "symlink"), "an edited-PR caller that is a symlink is refused like any other caller, and nothing is written")
+    d = fresh("edited-not-required")
+    init(d)
+    os.remove(os.path.join(d, EDITED[0]))
+    ok(check(d) == [],
+       "the check does not ask for the edited-PR caller: a repo that moves its pin without running init is already red on its markers")
 
     # 9. the check is red for each failure, and reports exactly that failure's codes.
     def checked(mutate):
@@ -1987,6 +2095,24 @@ def selftest():
                        ("that also calls the toolkit", sec_t + G)):
         ok(bad_t != sec_t and fires("derive-caller-form", lambda: derive_text(SECURITY[1], bad_t, label)),
            "derive refuses a security caller template %s" % why)
+    ed_t = read(os.path.join(RELEASE, EDITED[1]))
+    ok(derive_text(EDITED[1], ed_t, label) == ed_t, "derive passes the committed edited-PR session-link caller through unchanged")
+    ok(fires("derive-caller-form", lambda: derive_text(EDITED[1], ed_t + G, label)),
+       "derive refuses an edited-PR caller template that also calls the toolkit")
+    t1_t = read(os.path.join(RELEASE, TIER1[1]))
+    ok(not fires("derive-edited-drift", lambda: check_edited_copy(t1_t, ed_t)),
+       "the committed Tier 1 caller and edited-PR caller carry one session-links job, apart from its name")
+    for why, bad_t in (("a changed line", ed_t.replace("PAT='Claude", "PAT2='Claude", 1)),
+                       ("an extra step", ed_t.replace("      - name: Checkout\n", "      - name: Extra\n        run: true\n      - name: Checkout\n", 1)),
+                       ("the job renamed back to Tier 1's name", ed_t.replace("name: No session links (PR edited)\n  runs-on", "name: No session links\n  runs-on").replace("    name: No session links (PR edited)\n    runs-on", "    name: No session links\n    runs-on")),
+                       ("no session-links job at all", ed_t.replace("  session-links:\n", "  other:\n", 1))):
+        ok(bad_t != ed_t and fires("derive-edited-drift", lambda: check_edited_copy(t1_t, bad_t)),
+           "derive refuses the pair when the edited-PR copy has %s" % why)
+    ok(fires("derive-edited-drift", lambda: check_edited_copy(t1_t.replace("PAT='Claude", "PAT2='Claude", 1), ed_t)),
+       "derive refuses the pair when only the Tier 1 job changed")
+    ok(fires("derive-edited-drift", lambda: derive_all(
+        {TIER1[1]: t1_t.replace("PAT='Claude", "PAT2='Claude", 1), EDITED[1]: ed_t}, rel, label, names=(TIER1[1], EDITED[1]))),
+       "derive stops on that drift in the run itself, before it writes anything")
     ok(fires("derive-version-mismatch", lambda: derive_all(
         {"agents-md.md": plain.replace("docs/02 " + relv, "docs/02 " + behind, 1)}, rel, label, names=("agents-md.md",))),
        "derive refuses a template whose marker is not the version docs/02 declares")

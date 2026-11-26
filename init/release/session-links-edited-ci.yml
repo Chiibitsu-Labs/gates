@@ -1,0 +1,252 @@
+# No session links, re-run on an edited PR. Drop at .github/workflows/session-links-edited.yml,
+# beside the Tier 1 caller from templates/tier1-ci.yml, on a PUBLIC repo that carries that
+# caller's `session-links:` job.
+#
+# WHY IT EXISTS. That job reads the PR's title and description from the event, and Tier 1's
+# bare `pull_request:` runs only on opened, synchronize and reopened. A description edited
+# after the last push was never read again, so a session link pasted into it stayed green
+# (Codex, on vibeOS PR #251). This workflow runs the same check on `edited`, which GitHub
+# sends when the title, the description or the base branch changes. It is its own workflow so
+# that an edit does not re-run every Tier 1 job.
+#
+# THE SAME CHECK, NOT A LIGHTER ONE. The job below is a copy of Tier 1's `session-links:`
+# job, byte for byte except its `name:`: same steps, same script. An edit can change the base
+# branch, which changes the commits the check owes, so a text-only check would not be the
+# same check. Its name differs on purpose: GitHub warns that one job name used in two
+# workflows makes a required check ambiguous and can block merging (Codex on PR #260, citing
+# GitHub's protected-branch documentation, not read here). Do not mark it required: it runs
+# only on an edit, so a PR never edited would wait for it.
+#
+# WHAT A MERGER READS: NOT THIS RUN, YET. A session that merges by vibeOS docs/04's "Who
+# merges" reads Tier 1 green off the Tier 1 WORKFLOW's conclusion (condition 1). This is a
+# different workflow and not a required check, so nothing stops a merge on its red but a
+# person reading the PR's checks. Closing that gap changes docs/04's merge rule, so this file
+# sets no merge rule of its own; the follow-up is filed in vibeOS's ops/canon-pending.md,
+# dated 2026-11-21, naming PR #260.
+#
+# KEEP THE TWO COPIES IDENTICAL. Change the job in templates/tier1-ci.yml and copy it here
+# whole, keeping this job's own `name:`, in the same commit; nothing checks that they match. Both are interim copies until
+# the job moves into Chiibitsu-Labs/gates (open work on vibeOS's board), and the "INTERIM,
+# AND A COPY" rules in the comment above tier1's job bind this one too.
+#
+# SAFE ON A PR FROM A FORK: the trigger is `pull_request`, never `pull_request_target`, so the
+# run gets a read-only token and no secrets, and PR text reaches the script only through
+# `env:`, never `${{ }}` inside `run:`. Do not change either.
+
+name: No session links (PR edited)
+
+on:
+  pull_request:
+    types: [edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per PR: a newer edit cancels an older run, since only the newest text counts.
+  group: session-links-edited-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  session-links:
+    name: No session links (PR edited)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every branch and tag, so a push's range can be computed and other refs excluded.
+          fetch-depth: 0
+
+      - name: Commits, changed files and PR text hold no session link
+        env:
+          # Through env, never interpolated into the script: a PR title or body is text
+          # anyone opening a PR writes, and `${{ }}` inside `run:` would execute it.
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # -u only, NOT pipefail: every check below reads FILES, one stage at a time with each stage's
+          # status checked, and the matcher runs in this shell, never on the right of a pipe, where its
+          # UNKNOWN exit would end only a subshell and read as "no link".
+          set -u
+          PAT='Claude''-Session:|claude\.ai/code/''session'
+          TMPD="${RUNNER_TEMP:-/tmp}/session-links"
+          mkdir -p "$TMPD" || { echo "UNKNOWN [session-links] no temp dir"; exit 1; }
+          # match_file FILE: 0 if it holds a link, 1 if not; anything else is UNKNOWN. NUL bytes are
+          # stripped first, so a file grep would call binary is still read, and UTF-16 text (each ASCII
+          # character followed by a NUL) reads as plain text.
+          match_file() {
+            tr -d '\000' < "$1" > "$TMPD/clean" || unknown "could not read text to check"
+            local rc=0
+            LC_ALL=C grep -a -i -E -- "$PAT" "$TMPD/clean" >/dev/null || rc=$?
+            [ "$rc" -le 1 ] || unknown "the matcher failed"
+            return "$rc"
+          }
+          # match_text TEXT: the same, for a string.
+          match_text() {
+            printf '%s\n' "$1" > "$TMPD/text" || unknown "could not stage text to check"
+            match_file "$TMPD/text"
+          }
+          unknown() {
+            echo "UNKNOWN [session-links] $1"
+            echo "::error title=session-links could not check::$1"
+            exit 1
+          }
+          # Workflow-command escaping, so a file named with a newline cannot inject a command.
+          esc() { local s="${1//%/%25}"; s="${s//$'\r'/%0D}"; printf '%s' "${s//$'\n'/%0A}"; }
+          FAIL=0
+          flag() { echo "::error title=session link::$(esc "$1")"; FAIL=1; }
+
+          # Prove the matcher can fail before a clean result means anything.
+          match_text "$(printf 'Fix\n\nclaude''-session: x')" || unknown "self-test: a trailer was not caught"
+          match_text 'see https://claude.ai/code/''session_x' || unknown "self-test: a session URL was not caught"
+          printf 'x\000y https://claude.ai/code/''session_x\n' > "$TMPD/nul" || unknown "self-test: could not stage"
+          match_file "$TMPD/nul" || unknown "self-test: a file with a NUL byte was skipped"
+          match_text "$(printf 'Co-Authored-By: Claude <noreply@anthropic.com>\nhttps://claude.ai/code')" \
+            && unknown "self-test: clean text was flagged"
+
+          case "${REPO_PRIVATE:-}" in
+            true)  echo "private repo: session links are allowed here; nothing to check"; exit 0 ;;
+            false) ;;
+            *)     unknown "repository visibility is not in the event" ;;
+          esac
+
+          ZERO=0000000000000000000000000000000000000000
+          has_ref() { git rev-parse -q --verify "$1^{commit}" >/dev/null; }
+          # REVS is the set of commits this event adds, as git rev-list arguments. Commits already
+          # on the default branch, or on a PR's base, are excluded: history this job never asks anyone
+          # to rewrite. Pushes to other branches are not scanned: their PR is the merge gate, and
+          # scoping a branch push without a PR kept producing false reds and false greens.
+          if [ "$EVENT" = "pull_request" ]; then
+            [ -n "${PR_BASE:-}" ] && [ -n "${PR_HEAD:-}" ] || unknown "pull request without base or head"
+            match_text "${PR_TITLE:-}
+          ${PR_BODY:-}" \
+              && flag "the PR title or description holds a session link"
+            TIP="$PR_HEAD"
+            REVS="$PR_HEAD"
+            if has_ref "$PR_BASE"; then REVS="$REVS ^$PR_BASE"; fi
+            if [ -n "${PR_BASE_REF:-}" ] && has_ref "origin/$PR_BASE_REF"; then REVS="$REVS ^origin/$PR_BASE_REF"; fi
+            if has_ref "origin/$DEFAULT_BRANCH"; then REVS="$REVS ^origin/$DEFAULT_BRANCH"; fi
+          elif [ "$EVENT" = "push" ]; then
+            if [ "${PUSH_AFTER:-}" = "$ZERO" ]; then echo "ref deleted: nothing to check"; exit 0; fi
+            if [ "${REF_TYPE:-}" = "tag" ]; then
+              # An annotated tag's message is in no commit. Walk the chain (a tag can point at a
+              # tag), bounded so a cycle cannot hang the job.
+              OBJ="$REF"; HOPS=0
+              while :; do
+                TYPE="$(git cat-file -t "$OBJ" 2>/dev/null)" || unknown "could not read the pushed tag"
+                [ "$TYPE" = "tag" ] || break
+                BODY="$(git cat-file -p "$OBJ")" || unknown "could not read a tag object"
+                match_text "$BODY" && flag "an annotated tag's message holds a session link"
+                OBJ="$(printf '%s\n' "$BODY" | sed -n '1s/^object //p')" || unknown "could not read a tag's target"
+                HOPS=$((HOPS + 1)); [ "$HOPS" -le 32 ] || unknown "tag chain longer than 32"
+              done
+              [ "$TYPE" = "commit" ] || { echo "tag points at a $TYPE: nothing more to check"; exit "$FAIL"; }
+              # The commits under it that NO branch holds are checked here; the rest get their
+              # branch's runs.
+              TIP="$OBJ"
+              BRANCHES="$(git for-each-ref --format='^%(objectname)' refs/remotes/origin)" \
+                || unknown "could not list the published branches"
+              EXCL="$(printf '%s' "$BRANCHES" | tr '\n' ' ')" || unknown "could not list the published branches"
+              REVS="$TIP $EXCL"
+            else
+              TIP="$PUSH_AFTER"
+              if [ "${REF#refs/heads/}" != "$DEFAULT_BRANCH" ]; then
+                echo "push to a branch other than the default: its PR runs this check"; exit 0
+              fi
+              if [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "$ZERO" ] \
+                   && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                REVS="$PUSH_AFTER ^$PUSH_BEFORE"
+              elif [ "${PUSH_BEFORE:-}" = "$ZERO" ]; then
+                REVS="$PUSH_AFTER"   # the default branch's first push: all of it is new
+              else
+                unknown "force-push to the default branch: its old tip is gone, so what it added cannot be told apart"
+              fi
+            fi
+          else
+            unknown "event '$EVENT' is not one this job knows how to scope"
+          fi
+
+          # Each commit, one at a time so the report can name it: its message, and every line it
+          # ADDS to a file (a removed line never adds a red of its own; a touched file still holding a
+          # link stays red until it is gone, below). The
+          # added lines matter because a link added in one commit and removed in the next is gone at
+          # the tip but stays in history once a merge commit or a rebase merge lands. `--cc` reads
+          # what a merge itself added; `--text` reads a binary file's lines too.
+          # shellcheck disable=SC2086  # REVS is a list of revisions, split on purpose
+          COMMITS="$(git rev-list $REVS)" || unknown "could not list the commits to check"
+          N=0
+          PATCH="${RUNNER_TEMP:-/tmp}/session-links-patch"
+          for C in $COMMITS; do
+            N=$((N + 1))
+            SHORTC="$(git rev-parse --short "$C")" || unknown "could not name a commit"
+            MSG="$(git log -1 --format=%B "$C")" || unknown "could not read a commit message"
+            match_text "$MSG" && flag "commit $SHORTC holds a session link in its message"
+            git diff-tree -p --text --no-color --no-ext-diff --root --cc --format= "$C" > "$PATCH" \
+              || unknown "could not read a commit's changes"
+            # A plain commit marks an added line `+`; a merge's combined diff marks a line it added
+            # against EVERY parent `++` (a line one parent already had came from that parent).
+            ADD='^\+'; [ "$(git rev-list --parents -n1 "$C" | wc -w)" -gt 2 ] && ADD='^\+\+'
+            # Hunk lines only, chosen by position, not text: a file's header lines come before its
+            # first `@@`, and a hunk line always starts with a +, - or space, never with `diff `.
+            # Each stage writes a file and is checked, so a stage that fails is UNKNOWN, not "clean".
+            awk '/^diff /{h=0; next} /^@@/{h=1; next} h' "$PATCH" > "$PATCH.hunks" \
+              || unknown "could not read a commit's changed lines"
+            GRC=0; grep -a -E "$ADD" "$PATCH.hunks" > "$PATCH.added" || GRC=$?
+            [ "$GRC" -le 1 ] || unknown "could not pick a commit's added lines"
+            match_file "$PATCH.added" && flag "commit $SHORTC adds a session link to a file"
+          done
+          echo "checked $N commit(s): messages and added lines"
+
+          # Files: every path those same commits add or change, read as it stands at the tip
+          # commit (not the working tree, which on a PR is a merge result). A path deleted by the
+          # tip has nothing left to read. Paths are checked as well as contents. `--cc` lists what a
+          # MERGE commit itself changed (a file added while resolving one), which plain `git log`
+          # leaves out, and still skips what a merge only brought in from a parent. The list is
+          # NUL-separated end to end, so a file name holding a newline stays one name.
+          LIST="${RUNNER_TEMP:-/tmp}/session-links-files"
+          if [ -n "$COMMITS" ]; then
+            # shellcheck disable=SC2086
+            git log -z --cc --format= --name-only --no-renames $REVS > "$LIST.raw" \
+              || unknown "could not list the changed files"
+            sort -zu < "$LIST.raw" > "$LIST.sorted" || unknown "could not sort the file list"
+            sed -z '/^$/d' "$LIST.sorted" > "$LIST" || unknown "could not clean the file list"
+          else
+            : > "$LIST"
+          fi
+          M=0
+          BLOB="${RUNNER_TEMP:-/tmp}/session-links-blob"
+          while IFS= read -r -d '' F; do
+            # A path that holds a link is never printed: that would copy the link into the log.
+            NAME="$F"
+            match_text "$F" && { flag "a changed file's path holds a session link"; NAME="that file"; }
+            # ls-tree prints nothing for a path the tip no longer has, and fails only on a real error.
+            ENTRY="$(git --literal-pathspecs ls-tree "$TIP" -- "$F")" || unknown "could not look up a changed file"
+            case "$ENTRY" in *" blob "*) ;; *) continue ;; esac   # deleted, or a submodule
+            M=$((M + 1))
+            git cat-file blob "$TIP:$F" > "$BLOB" || unknown "could not read a changed file"
+            match_file "$BLOB" && flag "$NAME holds a session link"
+          done < "$LIST"
+          echo "checked $M changed file(s)"
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "A public repo carries no session link (vibeOS templates/claude-md.md, 'Credit on GitHub')."
+            echo "A link already pushed here is public: GitHub keeps the commit by its SHA, and a PR"
+            echo "description keeps its edit history. Say so in your report. Before merge, on your own"
+            echo "branch: reword or drop the commit that carries it, and edit it out of the file or the PR"
+            echo "text, so it never reaches the default branch. A link that was in a file before this"
+            echo "change has no commit of yours to reword: edit it out of the file. A re-run reads the old"
+            echo "PR description, so push a commit after editing it. Then set \"sessionUrl\": false in the"
+            echo "attribution block of .claude/settings.json."
+          fi
+          exit "$FAIL"
