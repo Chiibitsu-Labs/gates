@@ -1,4 +1,4 @@
 # The protocol version this release's standing-orders copy carries, and the
 # vibeOS commit it was derived from by `init/gates_init.py derive`.
 protocol v8.2
-source chiibitsu/vibeOS@e6e9a1da8b63a2a4e8bb677f6a761af86c835b64
+source chiibitsu/vibeOS@46d9f3e2e480d996ce0e9a5fa86fe951a0e3dbb9
