@@ -3,8 +3,8 @@
 # purpose: a reusable workflow cannot discover its own commit, so the ref you pin has to be
 # handed to it. Change both together.
 #
-# READ THIS BEFORE COPYING: the SHA shipped below is v1.3.0, set by hand after that release
-# was tagged (2026-11-25), and the Releases table in the README is what says whether it is
+# READ THIS BEFORE COPYING: the SHA shipped below is v1.3.1, set by hand after that release
+# was tagged (2026-11-26), and the Releases table in the README is what says whether it is
 # still the one to use. This file once shipped v1.2.0, which the table marks **do not use**,
 # through three tags (v1.2.1, v1.2.2 and v1.3.0); a pin in a file nobody re-reads goes stale silently, so check the
 # table every time.
@@ -24,9 +24,9 @@
 on: [pull_request, push]
 jobs:
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@3e31679080575b785db7f2b5b976e1b4ae0f0e9a # v1.3.0
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@de75c411012e1266ca3ade2cbc6d5e9132a7e844 # v1.3.1
     with:
-      gates_ref: 3e31679080575b785db7f2b5b976e1b4ae0f0e9a # v1.3.0
+      gates_ref: de75c411012e1266ca3ade2cbc6d5e9132a7e844 # v1.3.1
 
   # ── The draft-stage reviewer (Tier 2, not a gate) ────────────────────────────────────────
   #
@@ -59,6 +59,6 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@3e31679080575b785db7f2b5b976e1b4ae0f0e9a # v1.3.0
+    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@de75c411012e1266ca3ade2cbc6d5e9132a7e844 # v1.3.1
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
