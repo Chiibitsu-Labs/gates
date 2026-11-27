@@ -1,1 +1,1 @@
-{ "name": "fixture-explicit-js-over-ts-sibling", "dependencies": { "next": "15.0.0" } }
+{ "name": "fixture-explicit-js-over-ts-sibling", "dependencies": { "next": "file:./not-installed" } }

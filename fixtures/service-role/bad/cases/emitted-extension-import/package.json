@@ -1,1 +1,1 @@
-{ "name": "fixture-emitted-extension-import", "dependencies": { "next": "15.0.0" } }
+{ "name": "fixture-emitted-extension-import", "dependencies": { "next": "file:./not-installed" } }
