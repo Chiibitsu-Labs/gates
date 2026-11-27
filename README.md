@@ -164,7 +164,12 @@ there:
 - The review caller reports `UNKNOWN [review] no REVIEW.md at the base revision` and fails.
   The reviewer reads its policy from the base revision, never from the pull request, and the
   base of a repo's first pull request cannot hold one yet. It runs from the second pull
-  request on. The reviewer is never a required check.
+  request on. The reviewer is never a required check. Measured 2026-11-27 on a test repo:
+  putting `REVIEW.md` on the base does not turn it green on the first pull request. The
+  review action then refuses to run because `review.yml` differs from the default branch's
+  copy (it has none yet), the step is skipped, and the job still says UNKNOWN. Whether
+  both files already on the default branch would make a first pull request green is not
+  measured here.
 - The Tier 1 caller's `project:` job ("Project gates") is the template's placeholder for your
   stack. With no `package.json` at the repo root, and none in its history, it **skips green,
   out loud** (a notice and a step summary), and it gates nothing until the steps are swapped
