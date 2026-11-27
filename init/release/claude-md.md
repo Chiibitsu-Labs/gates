@@ -168,7 +168,7 @@ the rules that already govern it: `chiibitsu/vibeOS:docs/04`'s "Who merges", `ch
    entitlement.** Past it the CAIO, then the founder, rules.
    vibeOS doc 04's "Before the loop starts" paragraph governs the **flip**, not the draft
    round:
-   the draft round fires on every Draft push once `review.yml` is wired, and is run by
+   the draft round fires on every Draft push, and (with a `review.yml` from gates v1.3.2) when a ready PR goes back to Draft, once `review.yml` is wired, and is run by
    in-session subagents until it is. It costs quota only, so there is nothing to
    hold. **Wiring the action does not retire the in-session round:** the action gets no
    per-change authority (the spec, the scope, the founder's rulings), so its green means a round

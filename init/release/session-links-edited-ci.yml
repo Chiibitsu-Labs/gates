@@ -25,7 +25,7 @@
 # dated 2026-11-21, naming PR #260.
 #
 # KEEP THE TWO COPIES IDENTICAL. Change the job in templates/tier1-ci.yml and copy it here
-# whole, keeping this job's own `name:`, in the same commit; nothing checks that they match. Both are interim copies until
+# whole, keeping this job's own `name:`, in the same commit; nothing in vibeOS checks that they match. Both are interim copies until
 # the job moves into Chiibitsu-Labs/gates (open work on vibeOS's board), and the "INTERIM,
 # AND A COPY" rules in the comment above tier1's job bind this one too.
 #
@@ -42,10 +42,12 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  # One run per PR: a newer edit cancels an older run, since only the newest text counts.
-  group: session-links-edited-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# NO CONCURRENCY GROUP, on purpose: each edit gets its own run, which reads the title and
+# description its own event carries. With one group and cancel-in-progress, a quick second
+# edit cancelled the run that saw a link (Codex, P1, on Chiibitsu-Labs/gates PR 26). A group
+# without cancel-in-progress still drops older pending runs (GitHub's concurrency docs), and
+# the payload's `changes.*.from` reaches one edit back only. Cost, accepted: runs per PR are
+# unbounded; each only reads, with a read-only token and no secrets.
 
 jobs:
   session-links:

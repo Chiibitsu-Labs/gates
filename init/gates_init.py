@@ -2133,6 +2133,13 @@ def selftest():
            "derive refuses a security caller template %s" % why)
     ed_t = read(os.path.join(RELEASE, EDITED[1]))
     ok(derive_text(EDITED[1], ed_t, label) == ed_t, "derive passes the committed edited-PR session-link caller through unchanged")
+    # The edited-PR caller carries NO concurrency group: with one and cancel-in-progress, a quick second
+    # edit cancelled the run that had seen a link (Codex, P1, on this repo's PR 26). Derive must keep
+    # accepting a template with no `concurrency` key, and init must write the file the same way.
+    ok(not re.search(r"(?m)^concurrency\s*:", ed_t) and not re.search(r"(?m)^\s+cancel-in-progress\s*:", ed_t),
+       "the committed edited-PR caller has no concurrency key and no cancel-in-progress anywhere")
+    ok(derive_text(EDITED[1], ed_t, label) == ed_t and not re.search(r"(?m)^concurrency\s*:", derive_text(EDITED[1], ed_t, label)),
+       "derive accepts the edited-PR caller with no concurrency key, and adds none")
     ok(fires("derive-caller-form", lambda: derive_text(EDITED[1], ed_t + G, label)),
        "derive refuses an edited-PR caller template that also calls the toolkit")
     for why, bad_t in (("an activity type other than edited", ed_t.replace("types: [edited]", "types: [opened]", 1)),
@@ -2223,6 +2230,74 @@ def selftest():
     run(["git", "checkout", "-q", "--", "templates/x.md"], clone)
     commit(clone, "unpushed")
     ok(fires("derive-not-main", lambda: published(clone, anyorigin)), "derive refuses a checkout whose HEAD is not origin/main")
+
+    # 12b. the Tier 1 caller's "Detect project manifest" step, run for real. Every other case here reads
+    # the caller as text; this one executes its script, because "a deleted package.json is red" is behaviour.
+    # The scripts under test are the ones in the committed release copy, taken out of the YAML as written.
+    def detect_script(text):
+        out, grab, ind = [], False, None
+        for line in text.split("\n"):
+            if not grab:
+                grab = line == "      - name: Detect project manifest"
+                got_run = False
+                continue
+            if not got_run:
+                got_run = line == "        run: |"
+                continue
+            if line.strip() and not line.startswith("          "):
+                break
+            out.append(line[10:])
+        return "\n".join(out) + "\n"
+
+    def detect(script, repo, event, pr_base=""):
+        o, sm = os.path.join(work, "gh-output"), os.path.join(work, "gh-summary")
+        for f in (o, sm):
+            open(f, "w").close()
+        e = dict(os.environ, EVENT=event, PR_BASE=pr_base, GITHUB_OUTPUT=o, GITHUB_STEP_SUMMARY=sm,
+                 RUNNER_TEMP=os.path.join(work, "gh-runner-temp"))
+        os.makedirs(e["RUNNER_TEMP"], exist_ok=True)
+        r = subprocess.run(["bash", "-c", script], cwd=repo, env=e, capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr, read(o) + read(sm)
+
+    def history(name, steps):
+        d = fresh(name)
+        run(["git", "init", "-q", "-b", "main"], d)
+        for what in steps:
+            if what == "add":
+                write(d, "package.json", "{}\n")
+                run(["git", "add", "package.json"], d)
+            elif what == "remove":
+                run(["git", "rm", "-q", "package.json"], d)
+            run(["git"] + env + ["commit", "-q", "--allow-empty", "-m", what], d)
+        return d
+
+    dscript = detect_script(read(os.path.join(RELEASE, TIER1[1])))
+    ok("Prove it can fail before a skip means anything." in dscript and "removed)" in dscript and len(dscript) > 2000,
+       "the Detect project manifest step was taken out of the committed Tier 1 caller whole")
+    rc, said, outs = detect(dscript, history("detect-has", ["none", "add"]), "push")
+    ok(rc == 0 and "found=true" in outs, "run for real: a repo with a package.json at the tip runs the project gates")
+    rc, said, outs = detect(dscript, history("detect-never", ["none", "more"]), "push")
+    ok(rc == 0 and "found=false" in outs and "SKIPPED" in outs,
+       "run for real: a repo that never had a package.json skips, out loud")
+    gone = history("detect-removed", ["none", "add", "remove", "later"])
+    rc, said, outs = detect(dscript, gone, "push")
+    ok(rc == 1 and "found=true" not in outs and "package.json removed" in outs,
+       "run for real: a push to a tip that dropped its package.json is red, not a skip")
+    # A branch-deletion push: GitHub runs it on the default branch's tip, so the run sees the same checkout
+    # as any push to that tip and the event name stays `push`. The tip is judged; it is red because it dropped
+    # its manifest, whatever branch was deleted, and green when it kept it.
+    rc, said, outs = detect(dscript, gone, "delete")
+    ok(rc == 1 and "package.json removed" in outs and "found=false" not in outs,
+       "run for real: a branch-deletion run on a default tip that dropped its manifest is red, and is never a skip")
+    rc, said, outs = detect(dscript, history("detect-delete-kept", ["none", "add", "later"]), "delete")
+    ok(rc == 0 and "found=true" in outs, "run for real: a branch-deletion run on a default tip that kept its manifest passes")
+    rc, said, outs = detect(dscript, history("detect-delete-never", ["none", "later"]), "delete")
+    ok(rc == 0 and "found=false" in outs, "run for real: a branch-deletion run on a tip that never had one skips, as any run there would")
+    # And the detector proves itself: break its decision and the step must refuse to run.
+    broken = dscript.replace('elif [ -n "$2" ]; then echo removed', 'elif [ -n "$2" ]; then echo skip', 1)
+    rc, said, outs = detect(broken, gone, "push")
+    ok(broken != dscript and rc == 1 and "self-test" in said,
+       "run for real: a detector whose removed case was broken fails its own self-test before it judges anything")
 
     # 13. the command line.
     empty_cwd, was = fresh("cwd"), os.getcwd()

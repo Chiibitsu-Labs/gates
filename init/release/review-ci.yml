@@ -46,6 +46,15 @@ name: Draft review
 
 on:
   pull_request:
+    # A bare `pull_request:` fires only on opened, synchronize and reopened (GitHub's
+    # documented default, as a Codex review quoted it; not measured here),
+    # so a PR opened ready and later converted to draft, with no push after, never started
+    # this workflow and its draft got no bound round. `converted_to_draft` is named for that.
+    # Each event now: opened, synchronize, reopened and converted_to_draft run the job when
+    # the PR is a same-repo draft, and skip it otherwise (the `if:` below). `ready_for_review`
+    # is left out on purpose: the job would only skip there. An `edited` title or body starts
+    # no draft round.
+    types: [opened, synchronize, reopened, converted_to_draft]
 
 permissions:
   contents: read
@@ -105,6 +114,6 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.1
+    uses: Chiibitsu-Labs/gates/.github/workflows/review.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

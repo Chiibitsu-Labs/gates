@@ -19,10 +19,12 @@
 #   3. Turn on GitHub's native secret scanning, and wire merge-time enforcement separately.
 #      The toolkit scans the working tree only.  (see: the `gates:` job)
 #   4. Swap the `project:` job's steps for your stack, or delete a step and say why in the
-#      commit — never neuter one into always-green. A repo with no `package.json` yet skips
-#      the job's Node steps out loud (a notice and a step summary), so a repo with no stack
-#      starts green rather than red; that skip is green but gates nothing, so it is not a
-#      pass for any stack, and a repo on another stack swaps the steps.  (see: the `project:` job)
+#      commit — never neuter one into always-green. A repo whose history never had a root
+#      `package.json` skips the job's Node steps out loud (a notice and a step summary), so a
+#      repo with no stack starts green rather than red. A repo that had one and dropped it,
+#      including an existing repo adopting this file, is red, not a skip. That skip is green but gates nothing, so it is not a pass for any stack,
+#      and a repo on another stack swaps the steps, the "Detect project manifest" step and
+#      every `if:` on its `found` output included.  (see: the `project:` job)
 #   5. Mark this workflow's JOBS required in branch protection — not the workflow, and not
 #      the draft reviewer. Branch protection selects CHECK RUNS, and a check run is a job,
 #      never a workflow: measured on vibeOS's own PR, whose Tier 1 workflow runs one
@@ -147,6 +149,9 @@ jobs:
   # a green that looked at one commit:
   #   - `fetch-depth: 0` on the `project:` checkout below. It ships with `lfs: true` and
   #     nothing else, so the job has ONE commit in it and there is no history to walk.
+  #     (Its "Detect project manifest" step fetches the checked-out commit's history,
+  #     without file contents, only when there is no `package.json`; it then skips the
+  #     gates or goes red.)
   #   - a range to scan, which does not exist on `pull_request` at all: `github.event.before`
   #     and `.after` are `push`-only, this workflow carries both triggers, and `project:`
   #     has no `if:`. `chiibitsu/vibeOS:.github/workflows/tier1.yml` spends ~80 lines
@@ -197,9 +202,9 @@ jobs:
   # release-URL download trades SHA-pinned code for unverified bytes piped into execution.
   # If you wire a history scanner yourself, prove it can fail before you trust it.
   gates:
-    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.1
+    uses: Chiibitsu-Labs/gates/.github/workflows/gates.yml@4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.2
     with:
-      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.1
+      gates_ref: 4d8a87ef4023cdcaf3ac79620f9718c5be09ffa4 # v1.3.2
 
   # NO CLAUDE SESSION LINKS ON A PUBLIC REPO (vibeOS `templates/claude-md.md`, "Credit on
   # GitHub"; the founder, 2026-11-11). A link pushed to a public repo stays readable in its history.
@@ -462,7 +467,9 @@ jobs:
           exit "$FAIL"
 
   # This repo's own Tier 1 steps. Node/TypeScript assumed; swap the runtime steps for
-  # another stack and keep the shape. If a step does not apply, delete it and say why in
+  # another stack and keep the shape. The "Detect project manifest" step and every `if:` on
+  # its `found` output are Node's too: a swap replaces or removes all of them together.
+  # Removing the detector but keeping an `if:` skips that step green with no notice. If a step does not apply, delete it and say why in
   # the commit — do not neuter it into always-green.
   #
   # NO MANIFEST, NO NODE STEPS — OUT LOUD. A repo with no `package.json` at its root has no
@@ -473,8 +480,40 @@ jobs:
   # failure: no `continue-on-error`, no job-level `if:` (a skipped job would print nothing).
   # A repo WITH a `package.json` runs every step exactly as before, so one with no `.nvmrc`
   # is still red. Two things this does NOT do: it does not look in subfolders (a
-  # `package.json` below the root reads as no manifest, so point the steps at it), and it is
+  # `package.json` below the root reads as no manifest, so point the steps and the detector
+  # at it), and it is
   # not a pass for a repo on another stack — such a repo swaps these steps, per the above.
+  #
+  # REMOVING THE MANIFEST IS RED, NOT A SKIP. The skip is only for a repo that has never had
+  # a project: no `package.json` at the root of the checked-out commit AND no commit in its
+  # history that ever had one (and, on a PR, none in the PR's base). Otherwise a PR deleting
+  # `package.json` would skip every step below and report green, the exact change that
+  # removes the project bypassing all its gates (Codex, P1, on Chiibitsu-Labs/gates PR 24).
+  # The same rule holds for every event, so a push after the deleting one is red too: it
+  # stays red until the manifest is back, or the detector is repointed or swapped out with
+  # the steps (the detector reads only the root, so changing the other steps alone leaves
+  # it red). A push deleting a branch is judged like any other run: GitHub runs it on the
+  # default branch's tip (GitHub's events docs say this of branches; a deleted tag is not
+  # stated there, and is judged by whatever commit the run checks out). When there is no `package.json`, the step fetches the checked-out commit's
+  # full history, and no other branch's, without file contents (`--filter=blob:none`), and
+  # reads it with `git log`; a
+  # repo with a `package.json` fetches nothing extra. History it cannot fetch or read is
+  # UNKNOWN, red. On a PR it also reads the base commit by the SHA the event carries, from
+  # git's objects, never from the checked-out tree: a PR cannot take its base's commits out
+  # of the merge's history, and this covers a head with unrelated history too.
+  # What a PR author can still do is edit this workflow in the same PR: on `pull_request`
+  # GitHub runs the PR's own copy of this file. That edit shows in the diff, and a PR editing
+  # the gate that judges it is usually the founder's merge (vibeOS `docs/04`, "Who merges").
+  # `pull_request_target` would run the base's copy instead, and is not used: this job runs
+  # the PR's own npm scripts, which it would hand the repo's secrets. A repo leaving Node, or
+  # one that once had a root `package.json` and dropped it, swaps these steps and the
+  # detector together; a repo with no stack at all deletes this job and takes `Project gates`
+  # off its required checks, saying why in the commit. Until then it is red with a message
+  # saying why.
+  # The step proves it can fail before it decides: a decision table and a throwaway git repo
+  # whose history adds `package.json`, deletes it, adds a later commit, and is then merged
+  # (`-s ours`) into a branch that never had it, which hides those commits from a plain
+  # `git log -- package.json` (round 2 of the draft review found that; `--full-history` reads them).
   project:
     name: Project gates
     runs-on: ubuntu-latest
@@ -489,17 +528,107 @@ jobs:
 
       - name: Detect project manifest
         id: manifest
+        env:
+          # Through env, never interpolated into the script.
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          set -u
+          unknown() {
+            echo "UNKNOWN [project-manifest] $1"
+            echo "::error title=Project gates could not check::$1"
+            exit 1
+          }
+          # has_manifest REV: prints yes or no for a package.json at REV's root, read from git's
+          # objects, never the working tree. Returns non-zero when REV cannot be read.
+          has_manifest() {
+            local entry
+            entry="$(git ls-tree "$1" -- package.json 2>/dev/null)" || return 2
+            if [ -n "$entry" ]; then echo yes; else echo no; fi
+          }
+          # last_touch REV: prints the newest commit in REV's history that added, changed or
+          # removed a root package.json, or nothing if none ever did. Non-zero if unreadable.
+          # --full-history: without it git follows only one side of a merge that matches it for
+          # this path, so a merge from a commit older than the manifest hides every commit that
+          # ever touched it.
+          last_touch() { git log -1 --full-history --format=%H "$1" -- package.json 2>/dev/null; }
+          # decide HEAD_HAS EVER: run, skip, or removed.
+          decide() {
+            if [ "$1" = yes ]; then echo run
+            elif [ -n "$2" ]; then echo removed
+            else echo skip; fi
+          }
+          is_sha() { case "$1" in *[!0-9a-f]*) return 1 ;; esac; [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]; }
+
+          # Prove it can fail before a skip means anything.
+          [ "$(decide no somecommit)" = removed ] || unknown "self-test: a removed manifest was not caught"
+          [ "$(decide no "")" = skip ] || unknown "self-test: a repo with no manifest was not a skip"
+          [ "$(decide yes "")" = run ] || unknown "self-test: a present manifest did not run"
+          [ "$(decide yes somecommit)" = run ] || unknown "self-test: a kept manifest did not run"
+          FIX="${RUNNER_TEMP:-/tmp}/manifest-selftest"
+          rm -rf "$FIX" && git init -q "$FIX" || unknown "self-test: could not make a scratch repo"
+          (
+            cd "$FIX" && G() { git -c user.name=selftest -c user.email=selftest@example.invalid "$@"; } \
+              && G commit -q --allow-empty -m none && git tag never \
+              && echo '{}' > package.json && git add package.json && G commit -qm with \
+              && git rm -q package.json && G commit -qm without && G commit -q --allow-empty -m later \
+              && git tag later && git checkout -q -b side never && G commit -q --allow-empty -m side \
+              && G merge -q -s ours -m hide later && git tag hidden
+          ) || unknown "self-test: could not build the scratch history"
+          R1="$(cd "$FIX" && has_manifest later~2)" && [ "$R1" = yes ] || unknown "self-test: a commit with package.json read as without"
+          R2="$(cd "$FIX" && has_manifest later)" && [ "$R2" = no ] || unknown "self-test: a commit without package.json read as with"
+          T="$(cd "$FIX" && last_touch later)" || unknown "self-test: could not read a scratch history"
+          [ "$(decide "$R2" "$T")" = removed ] || unknown "self-test: a later commit after the deletion was not caught"
+          T0="$(cd "$FIX" && last_touch never)" || unknown "self-test: could not read a scratch history"
+          [ "$(decide no "$T0")" = skip ] || unknown "self-test: a history that never had package.json was not a skip"
+          TM="$(cd "$FIX" && last_touch hidden)" || unknown "self-test: could not read a scratch history"
+          [ "$(decide no "$TM")" = removed ] || unknown "self-test: a merge hiding the manifest's history was not caught"
+          (cd "$FIX" && has_manifest 0000000000000000000000000000000000000001 >/dev/null) \
+            && unknown "self-test: an unreadable commit read as readable"
+          rm -rf "$FIX"
+
           if [ -f package.json ]; then
             echo "found=true" >> "$GITHUB_OUTPUT"
-            echo "package.json found: running the project gates."
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            MSG="Project gates SKIPPED: no package.json at the repo root, so there is no project to gate yet. Add one (and a .nvmrc) or swap these steps for your stack; until then this check passes without having run any."
-            echo "::notice title=Project gates skipped::$MSG"
-            echo "### Project gates skipped" >> "$GITHUB_STEP_SUMMARY"
-            echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+            echo "package.json found: running the project gates."; exit 0
           fi
+
+          # No package.json here. Read the checked-out commit's whole history, commits and trees
+          # only (no file contents), to tell "never had one" from "removed one".
+          # Only this commit's history: naming it keeps the fetch off every other branch.
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            HEAD_SHA="$(git rev-parse HEAD)" || unknown "could not name the checked-out commit"
+            git fetch -q --no-tags --filter=blob:none --unshallow origin "$HEAD_SHA" \
+              || unknown "could not fetch this commit's history"
+          fi
+          [ "$(git rev-parse --is-shallow-repository)" = false ] || unknown "history is still shallow"
+          EVER="$(last_touch HEAD)" || unknown "could not read this commit's history"
+          WHERE="this commit's history (last changed in ${EVER:-none})"
+          # On a PR, the base too, read by the SHA the event carries: a PR cannot remove its base's
+          # commits from the merge's history, and this also covers a head with unrelated history.
+          if [ -z "$EVER" ] && [ "$EVENT" = pull_request ]; then
+            is_sha "${PR_BASE:-}" || unknown "the PR's base is not a commit SHA"
+            git cat-file -e "$PR_BASE^{commit}" 2>/dev/null \
+              || git fetch -q --no-tags --filter=blob:none origin "$PR_BASE" \
+              || unknown "could not fetch the PR's base commit"
+            BASE_HAS="$(has_manifest "$PR_BASE")" || unknown "could not read the PR's base commit"
+            if [ "$BASE_HAS" = yes ]; then EVER="$PR_BASE"; WHERE="the PR's base ($PR_BASE)"; fi
+          fi
+
+          case "$(decide no "$EVER")" in
+            skip)
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              MSG="Project gates SKIPPED: no package.json at the repo root, and this commit's history never had one, so there is no project to gate yet. Add one (and a .nvmrc), or swap these steps, this detector and their found guards for your stack; until then this check passes without having run any."
+              echo "::notice title=Project gates skipped::$MSG"
+              echo "### Project gates skipped" >> "$GITHUB_STEP_SUMMARY"
+              echo "$MSG" >> "$GITHUB_STEP_SUMMARY" ;;
+            removed)
+              MSG="Project gates FAILED: there is no package.json at the repo root, but $WHERE had one. A removed manifest would skip every project gate, so it is red, not a skip. If the removal was a mistake, restore it. Changing the other steps alone cannot clear this: this detector reads only the root. If the project moved to a subfolder, point this detector and the steps at it. If the repo is leaving Node, replace this detector, the steps and their found guards with its stack's. If it has no stack, delete this job and take Project gates off the required checks, saying why in the commit."
+              echo "::error title=Project gates: package.json removed::$MSG"
+              echo "### Project gates failed: package.json removed" >> "$GITHUB_STEP_SUMMARY"
+              echo "$MSG" >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
+            *) unknown "no decision" ;;
+          esac
 
       - name: Setup Node
         if: steps.manifest.outputs.found == 'true'
